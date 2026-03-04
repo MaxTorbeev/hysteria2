@@ -96,6 +96,33 @@ sudo bash add_hy2_user.sh ivan MyStrongPass123
 - перезапускает `hysteria-server`;
 - выводит `hy2://` и `hysteria2://` URI и QR-код для нового пользователя.
 
+## Список всех пользователей + QR (grid)
+
+Для генерации ссылок и QR-кодов всех существующих пользователей используйте `show_hy2_clients.sh`:
+
+```bash
+chmod +x show_hy2_clients.sh
+sudo bash show_hy2_clients.sh
+```
+
+Скрипт:
+- читает текущий `auth` (`password` или `userpass`);
+- собирает пользователей из `/etc/hysteria/users.db` (или из `config.yaml`, если нужно);
+- генерирует `hy2://` и `hysteria2://` ссылки для каждого пользователя;
+- создает QR PNG и HTML-страницу с сеткой карточек.
+
+Папка вывода по умолчанию:
+
+```bash
+./hy2_clients_YYYYMMDD_HHMMSS
+```
+
+Кастомная папка вывода:
+
+```bash
+sudo bash show_hy2_clients.sh --out-dir /root/hy2_clients
+```
+
 ## Удаление Hysteria2
 
 Для удаления используйте `uninstall_hy2_debian.sh`:
