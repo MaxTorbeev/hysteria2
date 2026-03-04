@@ -8,6 +8,7 @@
 - выпускает сертификат Let's Encrypt для вашего домена;
 - проверяет, что домен указывает на IP текущего сервера;
 - генерирует конфиг сервера с `password`-авторизацией;
+- включает ACL-профиль (по флагу `ENABLE_ACL`, по умолчанию включен);
 - опционально включает `obfs` Salamander (по флагу `ENABLE_OBFS=1`);
 - создает и запускает `systemd`-сервис (`hysteria-server`);
 - выводит клиентские ссылки (`hy2://` и `hysteria2://`) и QR-код в терминале.
@@ -30,6 +31,7 @@
 - `/usr/local/bin/hysteria`
 - `/etc/hysteria/config.yaml`
 - `/etc/hysteria/auth.txt`
+- `/etc/hysteria/acl.txt` (по умолчанию создается)
 - `/etc/hysteria/obfs.txt` (только если включен `ENABLE_OBFS=1`)
 - `/etc/systemd/system/hysteria-server.service`
 - `/etc/letsencrypt/renewal-hooks/deploy/hysteria-restart.sh`
@@ -49,6 +51,7 @@ sudo DOMAIN=hp2.maxtor.name EMAIL=admin@maxtor.name PORT=443 bash install_hy2_de
 - `DOMAIN` (по умолчанию: `hp2.maxtor.name`)
 - `EMAIL` (обязателен для Let's Encrypt, можно ввести при запуске)
 - `PORT` (по умолчанию: `443`)
+- `ENABLE_ACL` (по умолчанию: `1`; `0` отключает ACL в конфиге)
 - `ENABLE_OBFS` (по умолчанию: `0`; `1` включает `obfs: salamander`)
 - `SKIP_DOMAIN_IP_CHECK` (по умолчанию: `0`, установить `1`, чтобы пропустить проверку)
 
@@ -56,6 +59,12 @@ sudo DOMAIN=hp2.maxtor.name EMAIL=admin@maxtor.name PORT=443 bash install_hy2_de
 
 ```bash
 sudo DOMAIN=example.com EMAIL=ops@example.com PORT=8443 bash install_hy2_debian.sh
+```
+
+С отключенным ACL:
+
+```bash
+sudo DOMAIN=example.com EMAIL=ops@example.com PORT=443 ENABLE_ACL=0 bash install_hy2_debian.sh
 ```
 
 С включенным obfs:
@@ -121,6 +130,7 @@ ss -lunp | rg ':443|:8443'
 ## Повторный запуск скрипта
 
 - Существующий секрет auth сохраняется: `/etc/hysteria/auth.txt`
+- ACL-файл сохраняется, если `ENABLE_ACL=1`: `/etc/hysteria/acl.txt`
 - Секрет obfs сохраняется, если `ENABLE_OBFS=1`: `/etc/hysteria/obfs.txt`
 - Конфиг и unit-файлы перезаписываются актуальными значениями
 - Сервис повторно включается/перезапускается через `systemd`
@@ -145,6 +155,12 @@ QR в терминале и PNG-файл содержат `hy2://` URI.
 ```bash
 sudo SKIP_DOMAIN_IP_CHECK=1 DOMAIN=example.com EMAIL=ops@example.com bash install_hy2_debian.sh
 ```
+
+## ACL по умолчанию
+
+Если `ENABLE_ACL=1`, скрипт создает `/etc/hysteria/acl.txt` со стартовым профилем:
+- блокирует приватные/локальные сети (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, `fc00::/7`, `fe80::/10`);
+- разрешает остальной трафик (`direct(all)`).
 
 ## Решение проблем
 

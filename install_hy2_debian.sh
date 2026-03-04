@@ -5,6 +5,7 @@ DOMAIN="${DOMAIN:-hp2.maxtor.name}"
 EMAIL="${EMAIL:-}"
 PORT="${PORT:-443}"
 ENABLE_OBFS="${ENABLE_OBFS:-0}"
+ENABLE_ACL="${ENABLE_ACL:-1}"
 SKIP_DOMAIN_IP_CHECK="${SKIP_DOMAIN_IP_CHECK:-0}"
 SERVICE_NAME="hysteria-server"
 HYSTERIA_BIN="/usr/local/bin/hysteria"
@@ -12,6 +13,7 @@ HYSTERIA_DIR="/etc/hysteria"
 CONFIG_FILE="${HYSTERIA_DIR}/config.yaml"
 AUTH_FILE="${HYSTERIA_DIR}/auth.txt"
 OBFS_FILE="${HYSTERIA_DIR}/obfs.txt"
+ACL_FILE="${HYSTERIA_DIR}/acl.txt"
 QR_PNG="/root/hy2-${DOMAIN}.png"
 
 log() {
@@ -51,6 +53,7 @@ validate_input() {
     die "PORT must be between 1 and 65535"
   fi
   [[ "${ENABLE_OBFS}" == "0" || "${ENABLE_OBFS}" == "1" ]] || die "ENABLE_OBFS must be 0 or 1"
+  [[ "${ENABLE_ACL}" == "0" || "${ENABLE_ACL}" == "1" ]] || die "ENABLE_ACL must be 0 or 1"
 }
 
 apt_install() {
@@ -167,6 +170,20 @@ prepare_runtime_files() {
     openssl rand -hex 16 > "${OBFS_FILE}"
     chmod 0600 "${OBFS_FILE}"
   fi
+
+  if [[ "${ENABLE_ACL}" == "1" && ! -f "${ACL_FILE}" ]]; then
+    cat > "${ACL_FILE}" <<'EOF'
+reject(10.0.0.0/8)
+reject(172.16.0.0/12)
+reject(192.168.0.0/16)
+reject(127.0.0.0/8)
+reject(169.254.0.0/16)
+reject(fc00::/7)
+reject(fe80::/10)
+direct(all)
+EOF
+    chmod 0644 "${ACL_FILE}"
+  fi
 }
 
 write_config() {
@@ -194,6 +211,15 @@ auth:
   type: password
   password: ${auth}
 EOF
+
+  if [[ "${ENABLE_ACL}" == "1" ]]; then
+    cat >> "${CONFIG_FILE}" <<EOF
+
+acl:
+  file: ${ACL_FILE}
+  geoUpdateInterval: 168h
+EOF
+  fi
 
   if [[ "${ENABLE_OBFS}" == "1" ]]; then
     cat >> "${CONFIG_FILE}" <<EOF
@@ -227,7 +253,9 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable --now "${SERVICE_NAME}"
+  systemctl enable "${SERVICE_NAME}"
+  systemctl restart "${SERVICE_NAME}"
+  systemctl is-active --quiet "${SERVICE_NAME}" || die "Service '${SERVICE_NAME}' failed to start"
 }
 
 configure_firewall() {
@@ -269,6 +297,11 @@ print_client_info() {
     echo "Obfs : salamander (${obfs})"
   else
     echo "Obfs : disabled"
+  fi
+  if [[ "${ENABLE_ACL}" == "1" ]]; then
+    echo "Acl  : enabled (${ACL_FILE})"
+  else
+    echo "Acl  : disabled"
   fi
   echo
   echo "Client URI (hy2):"
