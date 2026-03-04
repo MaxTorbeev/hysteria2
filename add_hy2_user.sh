@@ -5,6 +5,7 @@ HYSTERIA_DIR="${HYSTERIA_DIR:-/etc/hysteria}"
 CONFIG_FILE="${CONFIG_FILE:-${HYSTERIA_DIR}/config.yaml}"
 USERS_FILE="${USERS_FILE:-${HYSTERIA_DIR}/users.db}"
 AUTH_FILE="${AUTH_FILE:-${HYSTERIA_DIR}/auth.txt}"
+OBFS_FILE="${OBFS_FILE:-${HYSTERIA_DIR}/obfs.txt}"
 SERVICE_NAME="${SERVICE_NAME:-hysteria-server}"
 QR_DIR="${QR_DIR:-/root}"
 
@@ -162,32 +163,6 @@ rewrite_auth_block() {
   chmod 0600 "${CONFIG_FILE}" || true
 }
 
-remove_obfs_block() {
-  local tmp_cfg
-  tmp_cfg="$(mktemp)"
-
-  awk '
-    BEGIN {in_obfs=0}
-    {
-      if (!in_obfs && $0 ~ /^obfs:[[:space:]]*$/) {
-        in_obfs=1
-        next
-      }
-      if (in_obfs) {
-        if ($0 ~ /^[^[:space:]].*:/) {
-          in_obfs=0
-          print $0
-        }
-        next
-      }
-      print $0
-    }
-  ' "${CONFIG_FILE}" > "${tmp_cfg}"
-
-  mv "${tmp_cfg}" "${CONFIG_FILE}"
-  chmod 0600 "${CONFIG_FILE}" || true
-}
-
 restart_service() {
   systemctl restart "${SERVICE_NAME}"
   systemctl is-active --quiet "${SERVICE_NAME}" || die "Service '${SERVICE_NAME}' failed to start"
@@ -213,9 +188,13 @@ url_encode() {
 print_connection_info() {
   local user="$1"
   local pass="$2"
-  local domain port uri_hy2 uri_hysteria2 png_file
+  local domain port obfs uri_hy2 uri_hysteria2 png_file
   domain="$(extract_domain)"
   port="$(extract_port)"
+  obfs=""
+  if [[ -f "${OBFS_FILE}" ]]; then
+    obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
+  fi
 
   [[ -n "${domain}" ]] || die "Could not detect domain from ${CONFIG_FILE}"
 
@@ -225,6 +204,10 @@ print_connection_info() {
 
   uri_hy2="hy2://${enc_user}:${enc_pass}@${domain}:${port}/?sni=${domain}"
   uri_hysteria2="hysteria2://${enc_user}:${enc_pass}@${domain}:${port}/?sni=${domain}"
+  if [[ -n "${obfs}" ]]; then
+    uri_hy2="${uri_hy2}&obfs=salamander&obfs-password=${obfs}"
+    uri_hysteria2="${uri_hysteria2}&obfs=salamander&obfs-password=${obfs}"
+  fi
   uri_hy2="${uri_hy2}#HP2-${user}"
   uri_hysteria2="${uri_hysteria2}#HP2-${user}"
 
@@ -267,7 +250,6 @@ main() {
 
   add_user_to_db "${NEW_USER}" "${NEW_PASS}"
   rewrite_auth_block
-  remove_obfs_block
   restart_service
   print_connection_info "${NEW_USER}" "${NEW_PASS}"
 }

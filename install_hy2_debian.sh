@@ -10,7 +10,7 @@ HYSTERIA_BIN="/usr/local/bin/hysteria"
 HYSTERIA_DIR="/etc/hysteria"
 CONFIG_FILE="${HYSTERIA_DIR}/config.yaml"
 AUTH_FILE="${HYSTERIA_DIR}/auth.txt"
-MASQ_DIR="${HYSTERIA_DIR}/masquerade"
+OBFS_FILE="${HYSTERIA_DIR}/obfs.txt"
 QR_PNG="/root/hy2-${DOMAIN}.png"
 
 log() {
@@ -160,39 +160,16 @@ prepare_runtime_files() {
     openssl rand -hex 16 > "${AUTH_FILE}"
     chmod 0600 "${AUTH_FILE}"
   fi
-
-  mkdir -p "${MASQ_DIR}"
-  chmod 0755 "${MASQ_DIR}"
-  cat > "${MASQ_DIR}/index.html" <<EOF
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${DOMAIN}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 4rem 1.25rem; background: #f4f7fb; color: #0f172a; }
-    main { max-width: 760px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 2rem; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
-    h1 { margin-top: 0; font-size: 1.8rem; }
-    p { line-height: 1.6; }
-    code { background: #e2e8f0; padding: 0.15rem 0.35rem; border-radius: 6px; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${DOMAIN}</h1>
-    <p>This host is online.</p>
-    <p>If you are the administrator, Hysteria2 is configured with local masquerade content from <code>${MASQ_DIR}</code>.</p>
-  </main>
-</body>
-</html>
-EOF
-  chmod 0644 "${MASQ_DIR}/index.html"
+  if [[ ! -f "${OBFS_FILE}" ]]; then
+    openssl rand -hex 16 > "${OBFS_FILE}"
+    chmod 0600 "${OBFS_FILE}"
+  fi
 }
 
 write_config() {
-  local auth cert key
+  local auth obfs cert key
   auth="$(tr -d '[:space:]' < "${AUTH_FILE}")"
+  obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
   cert="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
   key="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 
@@ -210,10 +187,10 @@ auth:
   type: password
   password: ${auth}
 
-masquerade:
-  type: file
-  file:
-    dir: ${MASQ_DIR}
+obfs:
+  type: salamander
+  salamander:
+    password: ${obfs}
 EOF
   chmod 0600 "${CONFIG_FILE}"
 }
@@ -260,15 +237,17 @@ EOF
 }
 
 print_client_info() {
-  local auth uri_hy2 uri_hysteria2
+  local auth obfs uri_hy2 uri_hysteria2
   auth="$(tr -d '[:space:]' < "${AUTH_FILE}")"
-  uri_hy2="hy2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}#HP2-Hysteria2"
-  uri_hysteria2="hysteria2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}#HP2-Hysteria2"
+  obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
+  uri_hy2="hy2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
+  uri_hysteria2="hysteria2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
 
   echo
   log "Hysteria2 is installed and running."
   echo "Server: ${DOMAIN}:${PORT}/udp"
   echo "Auth : ${auth}"
+  echo "Obfs : salamander (${obfs})"
   echo
   echo "Client URI (hy2):"
   echo "${uri_hy2}"
