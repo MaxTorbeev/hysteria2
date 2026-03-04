@@ -188,11 +188,13 @@ url_encode() {
 print_connection_info() {
   local user="$1"
   local pass="$2"
-  local domain port obfs uri_hy2 uri_hysteria2 png_file
+  local domain port obfs uri_hy2 uri_hysteria2 png_file obfs_enabled
   domain="$(extract_domain)"
   port="$(extract_port)"
+  obfs_enabled=0
   obfs=""
-  if [[ -f "${OBFS_FILE}" ]]; then
+  if grep -Eq '^[[:space:]]*obfs:[[:space:]]*$' "${CONFIG_FILE}" && [[ -f "${OBFS_FILE}" ]]; then
+    obfs_enabled=1
     obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
   fi
 
@@ -204,7 +206,7 @@ print_connection_info() {
 
   uri_hy2="hy2://${enc_user}:${enc_pass}@${domain}:${port}/?sni=${domain}"
   uri_hysteria2="hysteria2://${enc_user}:${enc_pass}@${domain}:${port}/?sni=${domain}"
-  if [[ -n "${obfs}" ]]; then
+  if [[ "${obfs_enabled}" == "1" && -n "${obfs}" ]]; then
     uri_hy2="${uri_hy2}&obfs=salamander&obfs-password=${obfs}"
     uri_hysteria2="${uri_hysteria2}&obfs=salamander&obfs-password=${obfs}"
   fi

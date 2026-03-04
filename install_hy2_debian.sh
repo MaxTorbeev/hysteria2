@@ -4,6 +4,7 @@ set -euo pipefail
 DOMAIN="${DOMAIN:-hp2.maxtor.name}"
 EMAIL="${EMAIL:-}"
 PORT="${PORT:-443}"
+ENABLE_OBFS="${ENABLE_OBFS:-0}"
 SKIP_DOMAIN_IP_CHECK="${SKIP_DOMAIN_IP_CHECK:-0}"
 SERVICE_NAME="hysteria-server"
 HYSTERIA_BIN="/usr/local/bin/hysteria"
@@ -49,6 +50,7 @@ validate_input() {
   if (( PORT < 1 || PORT > 65535 )); then
     die "PORT must be between 1 and 65535"
   fi
+  [[ "${ENABLE_OBFS}" == "0" || "${ENABLE_OBFS}" == "1" ]] || die "ENABLE_OBFS must be 0 or 1"
 }
 
 apt_install() {
@@ -160,7 +162,8 @@ prepare_runtime_files() {
     openssl rand -hex 16 > "${AUTH_FILE}"
     chmod 0600 "${AUTH_FILE}"
   fi
-  if [[ ! -f "${OBFS_FILE}" ]]; then
+
+  if [[ "${ENABLE_OBFS}" == "1" && ! -f "${OBFS_FILE}" ]]; then
     openssl rand -hex 16 > "${OBFS_FILE}"
     chmod 0600 "${OBFS_FILE}"
   fi
@@ -169,7 +172,11 @@ prepare_runtime_files() {
 write_config() {
   local auth obfs cert key
   auth="$(tr -d '[:space:]' < "${AUTH_FILE}")"
-  obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
+  obfs=""
+  if [[ "${ENABLE_OBFS}" == "1" ]]; then
+    [[ -f "${OBFS_FILE}" ]] || die "OBFS file not found: ${OBFS_FILE}"
+    obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
+  fi
   cert="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
   key="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 
@@ -186,12 +193,18 @@ tls:
 auth:
   type: password
   password: ${auth}
+EOF
+
+  if [[ "${ENABLE_OBFS}" == "1" ]]; then
+    cat >> "${CONFIG_FILE}" <<EOF
 
 obfs:
   type: salamander
   salamander:
     password: ${obfs}
 EOF
+  fi
+
   chmod 0600 "${CONFIG_FILE}"
 }
 
@@ -239,15 +252,24 @@ EOF
 print_client_info() {
   local auth obfs uri_hy2 uri_hysteria2
   auth="$(tr -d '[:space:]' < "${AUTH_FILE}")"
-  obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
-  uri_hy2="hy2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
-  uri_hysteria2="hysteria2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
+  obfs=""
+  uri_hy2="hy2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}#HP2-Hysteria2"
+  uri_hysteria2="hysteria2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}#HP2-Hysteria2"
+  if [[ "${ENABLE_OBFS}" == "1" ]]; then
+    obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
+    uri_hy2="hy2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
+    uri_hysteria2="hysteria2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
+  fi
 
   echo
   log "Hysteria2 is installed and running."
   echo "Server: ${DOMAIN}:${PORT}/udp"
   echo "Auth : ${auth}"
-  echo "Obfs : salamander (${obfs})"
+  if [[ "${ENABLE_OBFS}" == "1" ]]; then
+    echo "Obfs : salamander (${obfs})"
+  else
+    echo "Obfs : disabled"
+  fi
   echo
   echo "Client URI (hy2):"
   echo "${uri_hy2}"

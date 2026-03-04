@@ -7,7 +7,8 @@
 - скачивает последнюю версию бинарника Hysteria2;
 - выпускает сертификат Let's Encrypt для вашего домена;
 - проверяет, что домен указывает на IP текущего сервера;
-- генерирует конфиг сервера с `password`-авторизацией и `obfs` Salamander (без masquerade);
+- генерирует конфиг сервера с `password`-авторизацией;
+- опционально включает `obfs` Salamander (по флагу `ENABLE_OBFS=1`);
 - создает и запускает `systemd`-сервис (`hysteria-server`);
 - выводит клиентские ссылки (`hy2://` и `hysteria2://`) и QR-код в терминале.
 
@@ -29,7 +30,7 @@
 - `/usr/local/bin/hysteria`
 - `/etc/hysteria/config.yaml`
 - `/etc/hysteria/auth.txt`
-- `/etc/hysteria/obfs.txt`
+- `/etc/hysteria/obfs.txt` (только если включен `ENABLE_OBFS=1`)
 - `/etc/systemd/system/hysteria-server.service`
 - `/etc/letsencrypt/renewal-hooks/deploy/hysteria-restart.sh`
 - `/root/hy2-<domain>.png` (PNG с QR-кодом)
@@ -48,12 +49,19 @@ sudo DOMAIN=hp2.maxtor.name EMAIL=admin@maxtor.name PORT=443 bash install_hy2_de
 - `DOMAIN` (по умолчанию: `hp2.maxtor.name`)
 - `EMAIL` (обязателен для Let's Encrypt, можно ввести при запуске)
 - `PORT` (по умолчанию: `443`)
+- `ENABLE_OBFS` (по умолчанию: `0`; `1` включает `obfs: salamander`)
 - `SKIP_DOMAIN_IP_CHECK` (по умолчанию: `0`, установить `1`, чтобы пропустить проверку)
 
 Пример:
 
 ```bash
 sudo DOMAIN=example.com EMAIL=ops@example.com PORT=8443 bash install_hy2_debian.sh
+```
+
+С включенным obfs:
+
+```bash
+sudo DOMAIN=example.com EMAIL=ops@example.com PORT=443 ENABLE_OBFS=1 bash install_hy2_debian.sh
 ```
 
 ## Добавление нового пользователя
@@ -113,7 +121,7 @@ ss -lunp | rg ':443|:8443'
 ## Повторный запуск скрипта
 
 - Существующий секрет auth сохраняется: `/etc/hysteria/auth.txt`
-- Существующий секрет obfs сохраняется: `/etc/hysteria/obfs.txt`
+- Секрет obfs сохраняется, если `ENABLE_OBFS=1`: `/etc/hysteria/obfs.txt`
 - Конфиг и unit-файлы перезаписываются актуальными значениями
 - Сервис повторно включается/перезапускается через `systemd`
 
@@ -124,7 +132,8 @@ ss -lunp | rg ':443|:8443'
 - `hysteria2://...`
 
 Используйте любую из ссылок в совместимом клиенте (например, на базе sing-box).  
-QR в терминале и PNG-файл содержат `hy2://` URI с параметрами obfs.
+QR в терминале и PNG-файл содержат `hy2://` URI.
+Если `ENABLE_OBFS=1`, в URI автоматически добавляются параметры obfs.
 
 ## Проверка домена и IP
 
@@ -164,6 +173,7 @@ cat /etc/hysteria/config.yaml
 
 ## Рекомендации по безопасности
 
-- Периодически ротируйте `/etc/hysteria/auth.txt` и `/etc/hysteria/obfs.txt`.
+- Периодически ротируйте `/etc/hysteria/auth.txt`.
+- Если используете `ENABLE_OBFS=1`, ротируйте также `/etc/hysteria/obfs.txt`.
 - Ограничьте доступ по SSH и поддерживайте Debian в актуальном состоянии.
 - Для продакшена добавьте ACL и rate-limit на уровне firewall.
