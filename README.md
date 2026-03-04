@@ -1,4 +1,4 @@
-# Скрипт установки git для Debian
+# Скрипт установки Hysteria2 для Debian
 
 В репозитории находится `install_hy2_debian.sh` - скрипт для быстрой установки сервера Hysteria2 на Debian.
 
@@ -6,6 +6,7 @@
 - устанавливает зависимости (`curl`, `openssl`, `certbot`, `qrencode`);
 - скачивает последнюю версию бинарника Hysteria2;
 - выпускает сертификат Let's Encrypt для вашего домена;
+- проверяет, что домен указывает на IP текущего сервера;
 - генерирует конфиг сервера с `password`-авторизацией, `obfs` Salamander и локальной маскировкой;
 - создает и запускает `systemd`-сервис (`hysteria-server`);
 - выводит клиентские ссылки (`hy2://` и `hysteria2://`) и QR-код в терминале.
@@ -48,6 +49,7 @@ sudo DOMAIN=hp2.maxtor.name EMAIL=admin@maxtor.name PORT=443 bash install_hy2_de
 - `DOMAIN` (по умолчанию: `hp2.maxtor.name`)
 - `EMAIL` (обязателен для Let's Encrypt, можно ввести при запуске)
 - `PORT` (по умолчанию: `443`)
+- `SKIP_DOMAIN_IP_CHECK` (по умолчанию: `0`, установить `1`, чтобы пропустить проверку)
 
 Пример:
 
@@ -78,6 +80,29 @@ sudo bash add_hy2_user.sh ivan MyStrongPass123
 - перезапускает `hysteria-server`;
 - выводит `hy2://` и `hysteria2://` URI и QR-код для нового пользователя.
 
+## Удаление Hysteria2
+
+Для удаления используйте `uninstall_hy2_debian.sh`:
+
+```bash
+chmod +x uninstall_hy2_debian.sh
+sudo bash uninstall_hy2_debian.sh
+```
+
+Удаление вместе с сертификатом Let's Encrypt:
+
+```bash
+sudo bash uninstall_hy2_debian.sh --domain example.com --purge-cert
+```
+
+Без интерактивного подтверждения:
+
+```bash
+sudo bash uninstall_hy2_debian.sh --yes
+```
+
+Скрипт удаляет сервис `hysteria-server`, бинарник `/usr/local/bin/hysteria`, директорию `/etc/hysteria` и deploy-hook для автообновления сертификата.
+
 ## Проверка сервиса
 
 ```bash
@@ -102,13 +127,16 @@ ss -lunp | rg ':443|:8443'
 Используйте любую из ссылок в совместимом клиенте (например, на базе sing-box).  
 QR в терминале и PNG-файл содержат `hy2://` URI с параметрами obfs.
 
-## Важное примечание про Obfs и маскировку
+## Проверка домена и IP
 
-Скрипт включает `obfs: salamander` и одновременно раздает локальную страницу маскировки для домена.
+Перед выпуском сертификата скрипт сравнивает IP домена с IP текущего сервера.
 
-- Obfs повышает устойчивость к простому DPI и сигнатурным блокировкам.
-- При включенном obfs трафик не выглядит как обычный HTTP/3 endpoint.
-- Настройки obfs (тип и пароль) должны совпадать на клиенте и сервере.
+- Если DNS не настроен или указывает на другой IP, установка остановится с ошибкой.
+- Для принудительного пропуска можно использовать:
+
+```bash
+sudo SKIP_DOMAIN_IP_CHECK=1 DOMAIN=example.com EMAIL=ops@example.com bash install_hy2_debian.sh
+```
 
 ## Решение проблем
 

@@ -4,6 +4,7 @@ set -euo pipefail
 DOMAIN="${DOMAIN:-hp2.maxtor.name}"
 EMAIL="${EMAIL:-}"
 PORT="${PORT:-443}"
+SKIP_DOMAIN_IP_CHECK="${SKIP_DOMAIN_IP_CHECK:-0}"
 SERVICE_NAME="hysteria-server"
 HYSTERIA_BIN="/usr/local/bin/hysteria"
 HYSTERIA_DIR="/etc/hysteria"
@@ -85,19 +86,56 @@ download_hysteria() {
 }
 
 ensure_domain_points_here() {
-  local public_ip dns_a dns_aaaa
-  public_ip="$(curl -4fsS --max-time 10 https://api.ipify.org || true)"
-  dns_a="$(getent ahostsv4 "${DOMAIN}" | awk '{print $1}' | head -n1 || true)"
-  dns_aaaa="$(getent ahostsv6 "${DOMAIN}" | awk '{print $1}' | head -n1 || true)"
+  local matched matched_ip dip sip
+  local -a server_ips domain_ips
 
-  if [[ -n "${public_ip}" && -n "${dns_a}" && "${public_ip}" != "${dns_a}" ]]; then
-    warn "A record for ${DOMAIN} (${dns_a}) does not match server public IPv4 (${public_ip})"
-    warn "Let's Encrypt may fail if DNS is incorrect"
+  if [[ "${SKIP_DOMAIN_IP_CHECK}" == "1" ]]; then
+    warn "Skipping domain/IP check because SKIP_DOMAIN_IP_CHECK=1"
+    return
   fi
 
-  if [[ -z "${dns_a}" && -z "${dns_aaaa}" ]]; then
-    warn "No DNS records resolved for ${DOMAIN}"
+  mapfile -t server_ips < <(
+    {
+      ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d'/' -f1
+      ip -o -6 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d'/' -f1
+      curl -4fsS --max-time 6 https://api.ipify.org 2>/dev/null || true
+      curl -6fsS --max-time 6 https://api64.ipify.org 2>/dev/null || true
+    } | awk 'NF && !seen[$0]++'
+  )
+  mapfile -t domain_ips < <(
+    {
+      getent ahostsv4 "${DOMAIN}" 2>/dev/null | awk '{print $1}'
+      getent ahostsv6 "${DOMAIN}" 2>/dev/null | awk '{print $1}'
+    } | awk 'NF && !seen[$0]++'
+  )
+
+  if (( ${#domain_ips[@]} == 0 )); then
+    die "Domain ${DOMAIN} does not resolve to any IP. Check DNS records first."
   fi
+
+  if (( ${#server_ips[@]} == 0 )); then
+    die "Could not detect server IP addresses. Set SKIP_DOMAIN_IP_CHECK=1 to bypass."
+  fi
+
+  matched=0
+  matched_ip=""
+  for dip in "${domain_ips[@]}"; do
+    for sip in "${server_ips[@]}"; do
+      if [[ "${dip}" == "${sip}" ]]; then
+        matched=1
+        matched_ip="${dip}"
+        break 2
+      fi
+    done
+  done
+
+  if (( matched == 0 )); then
+    warn "Domain ${DOMAIN} resolves to: ${domain_ips[*]}"
+    warn "Server IP candidates: ${server_ips[*]}"
+    die "Domain/IP mismatch. Point ${DOMAIN} to this server IP, then retry."
+  fi
+
+  log "Domain/IP check passed: ${DOMAIN} -> ${matched_ip}"
 }
 
 issue_certificate() {
@@ -242,7 +280,6 @@ print_client_info() {
 
   echo
   log "Hysteria2 is installed and running."
-  warn "OBFS is enabled. This improves obfuscation, but the server will not look like a standard HTTP/3 endpoint."
   echo "Server: ${DOMAIN}:${PORT}/udp"
   echo "Auth : ${auth}"
   echo "Obfs : salamander (${obfs})"
