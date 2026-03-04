@@ -37,7 +37,6 @@
 ## Быстрый старт
 
 ```bash
-cd /Users/mxt/Code/hp2
 chmod +x install_hy2_debian.sh
 sudo DOMAIN=hp2.maxtor.name EMAIL=admin@maxtor.name PORT=443 bash install_hy2_debian.sh
 ```
@@ -61,7 +60,6 @@ sudo DOMAIN=example.com EMAIL=ops@example.com PORT=8443 bash install_hy2_debian.
 Для добавления клиента используйте `add_hy2_user.sh`:
 
 ```bash
-cd /Users/mxt/Code/hp2
 chmod +x add_hy2_user.sh
 sudo bash add_hy2_user.sh <username> [password]
 ```
