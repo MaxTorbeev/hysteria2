@@ -7,7 +7,7 @@
 - скачивает последнюю версию бинарника Hysteria2;
 - выпускает сертификат Let's Encrypt для вашего домена;
 - проверяет, что домен указывает на IP текущего сервера;
-- генерирует конфиг сервера с `password`-авторизацией, `obfs` Salamander и локальной маскировкой;
+- генерирует конфиг сервера с `password`-авторизацией и локальной маскировкой;
 - создает и запускает `systemd`-сервис (`hysteria-server`);
 - выводит клиентские ссылки (`hy2://` и `hysteria2://`) и QR-код в терминале.
 
@@ -29,7 +29,6 @@
 - `/usr/local/bin/hysteria`
 - `/etc/hysteria/config.yaml`
 - `/etc/hysteria/auth.txt`
-- `/etc/hysteria/obfs.txt`
 - `/etc/hysteria/masquerade/index.html`
 - `/etc/systemd/system/hysteria-server.service`
 - `/etc/letsencrypt/renewal-hooks/deploy/hysteria-restart.sh`
@@ -76,6 +75,7 @@ sudo bash add_hy2_user.sh ivan MyStrongPass123
 Что делает скрипт:
 - добавляет пользователя в `/etc/hysteria/users.db`;
 - переводит `auth` в `userpass` в `/etc/hysteria/config.yaml`;
+- удаляет блок `obfs` из конфига (если остался от старой установки);
 - если сервер был в режиме одного пароля (`auth: password`), сохраняет старый пароль как пользователя `main`;
 - перезапускает `hysteria-server`;
 - выводит `hy2://` и `hysteria2://` URI и QR-код для нового пользователя.
@@ -114,7 +114,6 @@ ss -lunp | rg ':443|:8443'
 ## Повторный запуск скрипта
 
 - Существующий секрет auth сохраняется: `/etc/hysteria/auth.txt`
-- Существующий секрет obfs сохраняется: `/etc/hysteria/obfs.txt`
 - Конфиг и unit-файлы перезаписываются актуальными значениями
 - Сервис повторно включается/перезапускается через `systemd`
 
@@ -125,7 +124,7 @@ ss -lunp | rg ':443|:8443'
 - `hysteria2://...`
 
 Используйте любую из ссылок в совместимом клиенте (например, на базе sing-box).  
-QR в терминале и PNG-файл содержат `hy2://` URI с параметрами obfs.
+QR в терминале и PNG-файл содержат `hy2://` URI.
 
 ## Проверка домена и IP
 
@@ -165,6 +164,6 @@ cat /etc/hysteria/config.yaml
 
 ## Рекомендации по безопасности
 
-- Периодически ротируйте `/etc/hysteria/auth.txt` и `/etc/hysteria/obfs.txt`.
+- Периодически ротируйте `/etc/hysteria/auth.txt`.
 - Ограничьте доступ по SSH и поддерживайте Debian в актуальном состоянии.
 - Для продакшена добавьте ACL и rate-limit на уровне firewall.

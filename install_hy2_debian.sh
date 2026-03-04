@@ -10,7 +10,6 @@ HYSTERIA_BIN="/usr/local/bin/hysteria"
 HYSTERIA_DIR="/etc/hysteria"
 CONFIG_FILE="${HYSTERIA_DIR}/config.yaml"
 AUTH_FILE="${HYSTERIA_DIR}/auth.txt"
-OBFS_FILE="${HYSTERIA_DIR}/obfs.txt"
 MASQ_DIR="${HYSTERIA_DIR}/masquerade"
 QR_PNG="/root/hy2-${DOMAIN}.png"
 
@@ -162,11 +161,6 @@ prepare_runtime_files() {
     chmod 0600 "${AUTH_FILE}"
   fi
 
-  if [[ ! -f "${OBFS_FILE}" ]]; then
-    openssl rand -hex 16 > "${OBFS_FILE}"
-    chmod 0600 "${OBFS_FILE}"
-  fi
-
   mkdir -p "${MASQ_DIR}"
   chmod 0755 "${MASQ_DIR}"
   cat > "${MASQ_DIR}/index.html" <<EOF
@@ -197,9 +191,8 @@ EOF
 }
 
 write_config() {
-  local auth obfs cert key
+  local auth cert key
   auth="$(tr -d '[:space:]' < "${AUTH_FILE}")"
-  obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
   cert="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
   key="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 
@@ -216,11 +209,6 @@ tls:
 auth:
   type: password
   password: ${auth}
-
-obfs:
-  type: salamander
-  salamander:
-    password: ${obfs}
 
 masquerade:
   type: file
@@ -272,17 +260,15 @@ EOF
 }
 
 print_client_info() {
-  local auth obfs uri_hy2 uri_hysteria2
+  local auth uri_hy2 uri_hysteria2
   auth="$(tr -d '[:space:]' < "${AUTH_FILE}")"
-  obfs="$(tr -d '[:space:]' < "${OBFS_FILE}")"
-  uri_hy2="hy2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
-  uri_hysteria2="hysteria2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}&obfs=salamander&obfs-password=${obfs}#HP2-Hysteria2"
+  uri_hy2="hy2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}#HP2-Hysteria2"
+  uri_hysteria2="hysteria2://${auth}@${DOMAIN}:${PORT}/?sni=${DOMAIN}#HP2-Hysteria2"
 
   echo
   log "Hysteria2 is installed and running."
   echo "Server: ${DOMAIN}:${PORT}/udp"
   echo "Auth : ${auth}"
-  echo "Obfs : salamander (${obfs})"
   echo
   echo "Client URI (hy2):"
   echo "${uri_hy2}"
