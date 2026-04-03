@@ -492,17 +492,11 @@ EOF
         "timeout": "1s"
       },
       {
-        "inbound": ["tproxy-in"],
-        "type": "logical",
-        "mode": "or",
-        "rules": [
-          {
-            "protocol": "dns"
-          },
-          {
-            "port": 53
-          }
-        ],
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "port": 53,
         "action": "hijack-dns"
       },
 ${domain_rule}${suffix_rule}      {
