@@ -12,6 +12,8 @@ logs/
 # Environment files
 .env
 .env.*
+!.env.example
+!router/.env.example
 
 # Build / temp
 dist/
