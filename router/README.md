@@ -133,12 +133,14 @@ sudo REMOVE_IMAGE=1 PURGE_CONFIG=1 bash remove_router.sh
 - ждет появления интерфейса `awg*`/`wg*`;
 - пытается включить `ip_forward`, отключить `rp_filter` и включить `src_valid_mark`, но не падает, если это уже подготовлено на хосте;
 - создает `ip rule` и `local route` для `fwmark`;
+- перехватывает DNS (`53/tcp`, `53/udp`) до проверки RFC1918, чтобы DNS внутри VPN-подсети тоже уходил в `sing-box`;
 - создает `nftables` `TPROXY` rule только для трафика, который приходит через найденный `awg*`/`wg*`;
 - запускает `sing-box`.
 
 `sing-box`:
 - перехватывает TCP/UDP через `tproxy`;
 - sniff'ит протоколы;
+- DNS hijack матчится по `protocol=dns` или `port=53`, чтобы UDP/53 не выпадал из DNS-модуля;
 - отправляет `.ru` и `.рф` напрямую;
 - DNS-запросы hijack'ит в локальный DNS модуль;
 - все остальное маршрутизирует в `Hysteria 2`.

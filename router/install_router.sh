@@ -493,7 +493,16 @@ EOF
       },
       {
         "inbound": ["tproxy-in"],
-        "protocol": "dns",
+        "type": "logical",
+        "mode": "or",
+        "rules": [
+          {
+            "protocol": "dns"
+          },
+          {
+            "port": 53
+          }
+        ],
         "action": "hijack-dns"
       },
 ${domain_rule}${suffix_rule}      {

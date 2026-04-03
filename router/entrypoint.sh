@@ -72,6 +72,8 @@ setup_rules() {
 
   nft add table ip "${NFT_TABLE}"
   nft "add chain ip ${NFT_TABLE} prerouting { type filter hook prerouting priority mangle; policy accept; }"
+  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" udp dport 53 tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
+  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" tcp dport 53 tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
   nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } return
   nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" meta l4proto { tcp, udp } tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
 }
