@@ -10,11 +10,14 @@ POSITIONAL_HY2_URI=""
 WORK_DIR=""
 CONFIG_DIR=""
 CONFIG_FILE=""
+BIN_DIR=""
+ENTRYPOINT_FILE=""
+SERVICE_ENV_FILE=""
 STATE_ENV_FILE=""
 
-IMAGE_NAME=""
-CONTAINER_NAME=""
-AMNEZIA_CONTAINER=""
+SERVICE_NAME=""
+UNIT_NAME=""
+SYSTEMD_UNIT_FILE=""
 AWG_IFACE=""
 
 TPROXY_PORT=""
@@ -27,6 +30,7 @@ DNS_SERVER=""
 DNS_SERVER_PORT=""
 DNS_STRATEGY=""
 DEBUG_SOCKS_PORT=""
+INSTALL_PACKAGES=""
 
 DIRECT_SUFFIXES=""
 EXTRA_DIRECT_DOMAINS=""
@@ -64,21 +68,20 @@ Usage:
 If present, router/.env is loaded automatically.
 
 Optional variables:
-  HY2_URI              Hysteria2 URI. Optional if present in env file.
-  INPUT_ENV_FILE       Env file to source before applying defaults.
-  AMNEZIA_CONTAINER   Docker container with AmneziaWG (auto-detected if empty)
-  CONTAINER_NAME      Router sidecar container name (default: hp2-router)
-  IMAGE_NAME          Docker image tag (default: hp2-router:latest)
-  WORK_DIR            Where config/env files are stored (default: /opt/hp2-router)
-  AWG_IFACE           WireGuard interface inside the Amnezia container (auto-detected if empty)
-  DIRECT_SUFFIXES     Domain suffixes routed directly, comma-separated (default: ru,xn--p1ai)
+  HY2_URI                Hysteria2 URI. Optional if present in env file.
+  INPUT_ENV_FILE         Env file to source before applying defaults.
+  SERVICE_NAME           systemd service name (default: hp2-router)
+  WORK_DIR               Where config/runtime files are stored (default: /opt/hp2-router)
+  AWG_IFACE              Host awg/wg interface (auto-detected if empty)
+  DIRECT_SUFFIXES        Domain suffixes routed directly, comma-separated (default: ru,xn--p1ai)
   EXTRA_DIRECT_DOMAINS   Exact domains routed directly, comma-separated
   EXTRA_DIRECT_SUFFIXES  Extra domain suffixes routed directly, comma-separated
-  DNS_SERVER           Upstream DNS server for sing-box (default: 77.88.8.8)
-  DNS_SERVER_PORT      Upstream DNS port (default: 53)
-  DNS_STRATEGY         DNS strategy (default: prefer_ipv4)
-  DEBUG_SOCKS_PORT     Optional SOCKS inbound for debugging hy2-out directly
-  SAVE_STATE_ENV      Set to 1 to save effective settings to WORK_DIR/router.env
+  DNS_SERVER             Upstream DNS server for sing-box (default: 77.88.8.8)
+  DNS_SERVER_PORT        Upstream DNS port (default: 53)
+  DNS_STRATEGY           DNS strategy (default: prefer_ipv4)
+  DEBUG_SOCKS_PORT       Optional SOCKS inbound for debugging hy2-out directly
+  INSTALL_PACKAGES       Set to 1 to install sing-box and nftables via apt
+  SAVE_STATE_ENV         Set to 1 to save effective settings to WORK_DIR/router.env
 EOF
 }
 
@@ -134,15 +137,24 @@ load_env_file() {
   set +a
 }
 
+normalize_service_name() {
+  local raw_name="${SERVICE_NAME:-hp2-router}"
+  UNIT_NAME="${raw_name%.service}.service"
+  SERVICE_NAME="${UNIT_NAME%.service}"
+  SYSTEMD_UNIT_FILE="${SYSTEMD_UNIT_FILE:-/etc/systemd/system/${UNIT_NAME}}"
+}
+
 apply_defaults() {
   WORK_DIR="${WORK_DIR:-/opt/hp2-router}"
   CONFIG_DIR="${WORK_DIR}/config"
-  CONFIG_FILE="${CONFIG_DIR}/config.json"
+  CONFIG_FILE="${CONFIG_FILE:-${CONFIG_DIR}/config.json}"
+  BIN_DIR="${BIN_DIR:-${WORK_DIR}/bin}"
+  ENTRYPOINT_FILE="${ENTRYPOINT_FILE:-${BIN_DIR}/router-entrypoint.sh}"
+  SERVICE_ENV_FILE="${SERVICE_ENV_FILE:-${WORK_DIR}/service.env}"
   STATE_ENV_FILE="${STATE_ENV_FILE:-${WORK_DIR}/router.env}"
 
-  IMAGE_NAME="${IMAGE_NAME:-hp2-router:latest}"
-  CONTAINER_NAME="${CONTAINER_NAME:-hp2-router}"
-  AMNEZIA_CONTAINER="${AMNEZIA_CONTAINER:-}"
+  SERVICE_NAME="${SERVICE_NAME:-hp2-router}"
+  normalize_service_name
   AWG_IFACE="${AWG_IFACE:-}"
 
   TPROXY_PORT="${TPROXY_PORT:-60080}"
@@ -155,6 +167,7 @@ apply_defaults() {
   DNS_SERVER_PORT="${DNS_SERVER_PORT:-53}"
   DNS_STRATEGY="${DNS_STRATEGY:-prefer_ipv4}"
   DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-}"
+  INSTALL_PACKAGES="${INSTALL_PACKAGES:-0}"
 
   DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-ru,xn--p1ai}"
   EXTRA_DIRECT_DOMAINS="${EXTRA_DIRECT_DOMAINS:-}"
@@ -268,93 +281,34 @@ parse_hy2_uri() {
   [[ -n "${HYSTERIA_SNI}" ]] || HYSTERIA_SNI="${HYSTERIA_SERVER}"
 }
 
-container_has_vpn_iface() {
-  local container="$1"
-  docker exec "${container}" sh -lc '
-    for dev in /sys/class/net/*; do
-      dev="${dev##*/}"
-      case "${dev}" in
-        awg*|wg*)
-          exit 0
-          ;;
-      esac
-    done
-    exit 1
-  ' >/dev/null 2>&1
-}
-
-detect_amnezia_container() {
-  local name image lower_info
-  local -a candidates=()
-  local -a preferred=()
-
-  while IFS=$'\t' read -r name image; do
-    [[ -n "${name}" ]] || continue
-    if container_has_vpn_iface "${name}"; then
-      candidates+=("${name}")
-      lower_info="${name,,} ${image,,}"
-      if [[ "${lower_info}" =~ amnezia|awg|wireguard ]]; then
-        preferred+=("${name}")
-      fi
-    fi
-  done < <(docker ps --format '{{.Names}}	{{.Image}}')
-
-  if (( ${#preferred[@]} == 1 )); then
-    AMNEZIA_CONTAINER="${preferred[0]}"
-    return 0
-  fi
-
-  if (( ${#candidates[@]} == 1 )); then
-    AMNEZIA_CONTAINER="${candidates[0]}"
-    return 0
-  fi
-
-  if (( ${#preferred[@]} > 1 )); then
-    die "Multiple Amnezia-like containers detected: ${preferred[*]}. Set AMNEZIA_CONTAINER explicitly."
-  fi
-
-  if (( ${#candidates[@]} > 1 )); then
-    die "Multiple containers with awg/wg interfaces detected: ${candidates[*]}. Set AMNEZIA_CONTAINER explicitly."
-  fi
-
-  die "Could not auto-detect an AmneziaWG container. Set AMNEZIA_CONTAINER explicitly."
-}
-
-resolve_amnezia_container() {
-  if [[ -z "${AMNEZIA_CONTAINER}" ]]; then
-    detect_amnezia_container
-    log "Detected Amnezia container: ${AMNEZIA_CONTAINER}"
-  fi
-
-  docker inspect "${AMNEZIA_CONTAINER}" >/dev/null 2>&1 || die "Container not found: ${AMNEZIA_CONTAINER}"
-  [[ "$(docker inspect -f '{{.State.Running}}' "${AMNEZIA_CONTAINER}")" == "true" ]] || die "Container is not running: ${AMNEZIA_CONTAINER}"
+is_ip_literal() {
+  local value="$1"
+  [[ "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ || "${value}" == *:* ]]
 }
 
 detect_awg_iface() {
-  local iface
-  iface="$(docker exec "${AMNEZIA_CONTAINER}" sh -lc '
-    for dev in /sys/class/net/*; do
-      dev="${dev##*/}"
-      case "${dev}" in
-        awg*)
-          echo "${dev}"
-          exit 0
-          ;;
-      esac
-    done
+  local dev iface=""
+  for dev in /sys/class/net/*; do
+    dev="${dev##*/}"
+    case "${dev}" in
+      awg*)
+        iface="${dev}"
+        break
+        ;;
+    esac
+  done
+  if [[ -z "${iface}" ]]; then
     for dev in /sys/class/net/*; do
       dev="${dev##*/}"
       case "${dev}" in
         wg*)
-          echo "${dev}"
-          exit 0
+          iface="${dev}"
+          break
           ;;
       esac
     done
-    exit 1
-  ' 2>/dev/null || true)"
-
-  [[ -n "${iface}" ]] || die "Could not auto-detect awg/wg interface inside ${AMNEZIA_CONTAINER}. Set AWG_IFACE explicitly."
+  fi
+  [[ -n "${iface}" ]] || die "Could not auto-detect a host awg/wg interface. Start host-level AmneziaWG first or set AWG_IFACE explicitly."
   AWG_IFACE="${iface}"
 }
 
@@ -365,21 +319,36 @@ resolve_awg_iface() {
     return 0
   fi
 
-  docker exec "${AMNEZIA_CONTAINER}" sh -lc '
-    target="$1"
-    for dev in /sys/class/net/*; do
-      dev="${dev##*/}"
-      if [ "${dev}" = "${target}" ]; then
-        exit 0
-      fi
-    done
-    exit 1
-  ' sh "${AWG_IFACE}" >/dev/null 2>&1 || die "Interface ${AWG_IFACE} not found inside ${AMNEZIA_CONTAINER}"
+  if ip link show dev "${AWG_IFACE}" >/dev/null 2>&1; then
+    log "Using WireGuard interface: ${AWG_IFACE}"
+  else
+    warn "Interface ${AWG_IFACE} is not present yet; the service will wait up to ${WAIT_TIMEOUT}s on start"
+  fi
 }
 
-ensure_amnezia_container() {
-  resolve_amnezia_container
-  resolve_awg_iface
+install_host_packages() {
+  [[ "${INSTALL_PACKAGES}" == "1" ]] || return 0
+
+  require_cmd apt-get
+  require_cmd curl
+
+  log "Installing host packages"
+  apt-get update
+  apt-get install -y ca-certificates curl iproute2 nftables
+
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc
+  chmod a+r /etc/apt/keyrings/sagernet.asc
+  cat > /etc/apt/sources.list.d/sagernet.sources <<'EOF'
+Types: deb
+URIs: https://deb.sagernet.org/
+Suites: *
+Components: *
+Enabled: yes
+Signed-By: /etc/apt/keyrings/sagernet.asc
+EOF
+  apt-get update
+  apt-get install -y sing-box
 }
 
 render_config() {
@@ -391,13 +360,14 @@ render_config() {
   local debug_socks_inbound=""
 
   direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SNI}")"
-  direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SERVER}")"
+  if ! is_ip_literal "${HYSTERIA_SERVER}"; then
+    direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SERVER}")"
+  fi
   direct_domains="$(add_csv_item "${direct_domains}" "${EXTRA_DIRECT_DOMAINS}")"
 
   if [[ -n "${direct_domains//,/}" ]]; then
     domain_rule=$(cat <<EOF
       {
-        "inbound": ["tproxy-in"],
         "domain": $(csv_to_json_array "${direct_domains}"),
         "action": "route",
         "outbound": "direct"
@@ -413,7 +383,6 @@ EOF
     fi
     suffix_rule=$(cat <<EOF
       {
-        "inbound": ["tproxy-in"],
         "domain_suffix": $(csv_to_json_array "${all_suffixes}"),
         "action": "route",
         "outbound": "direct"
@@ -459,8 +428,8 @@ EOF
 )
   fi
 
-  mkdir -p "${CONFIG_DIR}"
-  chmod 0700 "${WORK_DIR}" "${CONFIG_DIR}"
+  mkdir -p "${WORK_DIR}" "${CONFIG_DIR}" "${BIN_DIR}"
+  chmod 0700 "${WORK_DIR}" "${CONFIG_DIR}" "${BIN_DIR}"
 
   cat > "${CONFIG_FILE}" <<EOF
 {
@@ -517,7 +486,6 @@ EOF
     },
     "rules": [
       {
-        "inbound": ["tproxy-in"],
         "action": "sniff",
         "timeout": "1s"
       },
@@ -530,7 +498,6 @@ EOF
         "action": "hijack-dns"
       },
 ${domain_rule}${suffix_rule}      {
-        "inbound": ["tproxy-in"],
         "ip_is_private": true,
         "action": "route",
         "outbound": "direct"
@@ -543,19 +510,35 @@ EOF
   chmod 0600 "${CONFIG_FILE}"
 }
 
-write_env_file() {
+write_service_env_file() {
+  cat > "${SERVICE_ENV_FILE}" <<EOF
+AWG_IFACE=$(printf '%q' "${AWG_IFACE}")
+CONFIG_FILE=$(printf '%q' "${CONFIG_FILE}")
+TPROXY_PORT=$(printf '%q' "${TPROXY_PORT}")
+ROUTER_TABLE=$(printf '%q' "${ROUTER_TABLE}")
+ROUTER_MARK=$(printf '%q' "${ROUTER_MARK}")
+NFT_TABLE=$(printf '%q' "${NFT_TABLE}")
+WAIT_TIMEOUT=$(printf '%q' "${WAIT_TIMEOUT}")
+EOF
+  chmod 0600 "${SERVICE_ENV_FILE}"
+}
+
+write_state_env_file() {
   cat > "${STATE_ENV_FILE}" <<EOF
 HY2_URI=$(printf '%q' "${HY2_URI}")
-AMNEZIA_CONTAINER=$(printf '%q' "${AMNEZIA_CONTAINER}")
-CONTAINER_NAME=$(printf '%q' "${CONTAINER_NAME}")
-IMAGE_NAME=$(printf '%q' "${IMAGE_NAME}")
+SERVICE_NAME=$(printf '%q' "${SERVICE_NAME}")
+UNIT_NAME=$(printf '%q' "${UNIT_NAME}")
+SYSTEMD_UNIT_FILE=$(printf '%q' "${SYSTEMD_UNIT_FILE}")
 WORK_DIR=$(printf '%q' "${WORK_DIR}")
+CONFIG_FILE=$(printf '%q' "${CONFIG_FILE}")
+SERVICE_ENV_FILE=$(printf '%q' "${SERVICE_ENV_FILE}")
 AWG_IFACE=$(printf '%q' "${AWG_IFACE}")
 TPROXY_PORT=$(printf '%q' "${TPROXY_PORT}")
 ROUTER_TABLE=$(printf '%q' "${ROUTER_TABLE}")
 ROUTER_MARK=$(printf '%q' "${ROUTER_MARK}")
 NFT_TABLE=$(printf '%q' "${NFT_TABLE}")
 WAIT_TIMEOUT=$(printf '%q' "${WAIT_TIMEOUT}")
+LOG_LEVEL=$(printf '%q' "${LOG_LEVEL}")
 DNS_SERVER=$(printf '%q' "${DNS_SERVER}")
 DNS_SERVER_PORT=$(printf '%q' "${DNS_SERVER_PORT}")
 DNS_STRATEGY=$(printf '%q' "${DNS_STRATEGY}")
@@ -567,54 +550,46 @@ EOF
   chmod 0600 "${STATE_ENV_FILE}"
 }
 
-build_image() {
-  log "Building image ${IMAGE_NAME}"
-  docker build -t "${IMAGE_NAME}" "${SCRIPT_DIR}"
+install_entrypoint() {
+  install -m 0755 "${SCRIPT_DIR}/entrypoint.sh" "${ENTRYPOINT_FILE}"
 }
 
-prepare_namespace_sysctls() {
-  local pid
+install_systemd_unit() {
+  cat > "${SYSTEMD_UNIT_FILE}" <<EOF
+[Unit]
+Description=HP2 transparent router for host-level AmneziaWG
+After=network-online.target
+Wants=network-online.target
 
-  require_cmd nsenter
-  require_cmd sysctl
+[Service]
+Type=simple
+EnvironmentFile=${SERVICE_ENV_FILE}
+ExecStart=${ENTRYPOINT_FILE}
+Restart=on-failure
+RestartSec=3
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+NoNewPrivileges=false
 
-  pid="$(docker inspect -f '{{.State.Pid}}' "${AMNEZIA_CONTAINER}")"
-  [[ "${pid}" =~ ^[0-9]+$ ]] || die "Could not determine PID for ${AMNEZIA_CONTAINER}"
-  (( pid > 1 )) || die "Unexpected PID for ${AMNEZIA_CONTAINER}: ${pid}"
-
-  log "Preparing network namespace sysctls for ${AMNEZIA_CONTAINER} (pid ${pid})"
-
-  nsenter -t "${pid}" -n sysctl -w net.ipv4.ip_forward=1 >/dev/null
-  nsenter -t "${pid}" -n sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null
-  nsenter -t "${pid}" -n sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null
-  nsenter -t "${pid}" -n sysctl -w net.ipv4.conf.all.src_valid_mark=1 >/dev/null
-  nsenter -t "${pid}" -n sysctl -w "net.ipv4.conf.${AWG_IFACE}.rp_filter=0" >/dev/null
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 "${SYSTEMD_UNIT_FILE}"
 }
 
-remove_existing_container() {
-  if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
-    log "Removing existing container ${CONTAINER_NAME}"
-    docker rm -f "${CONTAINER_NAME}" >/dev/null
-  fi
+validate_dependencies() {
+  require_cmd ip
+  require_cmd nft
+  require_cmd systemctl
+  require_cmd sing-box
 }
 
-run_router() {
-  log "Starting router sidecar ${CONTAINER_NAME}"
-  docker run -d \
-    --name "${CONTAINER_NAME}" \
-    --restart unless-stopped \
-    --network "container:${AMNEZIA_CONTAINER}" \
-    --cap-add NET_ADMIN \
-    --cap-add NET_RAW \
-    -e AWG_IFACE="${AWG_IFACE}" \
-    -e CONFIG_FILE=/etc/sing-box/config.json \
-    -e TPROXY_PORT="${TPROXY_PORT}" \
-    -e ROUTER_TABLE="${ROUTER_TABLE}" \
-    -e ROUTER_MARK="${ROUTER_MARK}" \
-    -e NFT_TABLE="${NFT_TABLE}" \
-    -e WAIT_TIMEOUT="${WAIT_TIMEOUT}" \
-    -v "${CONFIG_FILE}:/etc/sing-box/config.json:ro" \
-    "${IMAGE_NAME}" >/dev/null
+reload_and_restart_service() {
+  log "Installing systemd unit ${UNIT_NAME}"
+  systemctl daemon-reload
+  systemctl enable "${UNIT_NAME}" >/dev/null
+  systemctl restart "${UNIT_NAME}"
 }
 
 print_summary() {
@@ -630,30 +605,35 @@ EOF
 
   cat <<EOF
 
-Router sidecar is running.
+Host router service is running.
 
-Container:
-  ${CONTAINER_NAME}
+Service:
+  ${UNIT_NAME}
+
+Interface:
+  ${AWG_IFACE}
 
 Config:
   ${CONFIG_FILE}
 
+Runtime env:
+  ${SERVICE_ENV_FILE}
+
 ${state_env_note}Main commands:
-  docker logs -f ${CONTAINER_NAME}
-  docker exec ${CONTAINER_NAME} sing-box check -c /etc/sing-box/config.json
+  systemctl status ${UNIT_NAME} --no-pager
+  journalctl -u ${UNIT_NAME} -f
   bash ${SCRIPT_DIR}/status_router.sh
 
 Notes:
   - Direct routing is currently based on domain suffixes: ${DIRECT_SUFFIXES}
   - Everything else falls back to Hysteria 2.
-  - If Amnezia recreates ${AMNEZIA_CONTAINER}, rerun this installer.
+  - This installer assumes host-level AmneziaWG is already configured or will appear on ${AWG_IFACE}.
 EOF
 }
 
 main() {
   parse_args "$@"
   require_root
-  require_cmd docker
   load_env_file
   apply_defaults
 
@@ -662,16 +642,19 @@ main() {
     exit 1
   fi
 
+  install_host_packages
+  validate_dependencies
   parse_hy2_uri "${HY2_URI}"
-  ensure_amnezia_container
+  resolve_awg_iface
   render_config
+  write_service_env_file
   if [[ "${SAVE_STATE_ENV}" == "1" ]]; then
-    write_env_file
+    write_state_env_file
   fi
-  build_image
-  prepare_namespace_sysctls
-  remove_existing_container
-  run_router
+  install_entrypoint
+  install_systemd_unit
+  sing-box check -c "${CONFIG_FILE}"
+  reload_and_restart_service
   print_summary
 }
 

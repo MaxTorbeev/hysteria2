@@ -1,38 +1,50 @@
-# Router Sidecar For AmneziaWG -> Hysteria2
+# Host-Level AmneziaWG -> sing-box -> Hysteria2
 
-Этот каталог содержит Docker-based router sidecar для российской точки входа с `AmneziaWG`.
+Этот каталог теперь содержит хостовый пакет для российской точки входа:
 
-Схема:
-- клиент подключается к российскому серверу через `AmneziaWG`;
-- `AmneziaWG` живет в docker-контейнере, который инсталлятор определяет автоматически;
-- sidecar-контейнер делит с ним network namespace, видит `awg*`/`wg*`, поднимает `TPROXY` и запускает `sing-box`;
+- клиент подключается к российскому серверу через host-level `AmneziaWG`;
+- `sing-box` работает на хосте как `systemd`-сервис;
+- `entrypoint.sh` настраивает `TPROXY`, `ip rule` и `nftables` прямо в host namespace;
 - домены в зонах `.ru` и `.рф` отправляются напрямую;
 - остальной трафик уходит на зарубежный `Hysteria 2`.
 
+Схема:
+
+```text
+Client -> AmneziaWG (host) -> TPROXY -> sing-box -> direct (.ru/.рф)
+                                             -> hysteria2 (everything else)
+```
+
 ## Что входит
 
-- `Dockerfile` - образ с `sing-box`, `nftables`, `iproute2`
-- `entrypoint.sh` - настраивает `TPROXY` и запускает `sing-box`
-- `install_router.sh` - читает параметры из `.env` или `--env-file`, генерирует конфиг и запускает sidecar
-- `remove_router.sh` - удаляет sidecar
-- `status_router.sh` - показывает состояние и логи
+- `install_router.sh` - читает параметры из `.env` или `--env-file`, генерирует `sing-box` конфиг, runtime env и `systemd` unit
+- `entrypoint.sh` - настраивает `TPROXY` и запускает `sing-box` на хосте
+- `remove_router.sh` - останавливает и удаляет `systemd`-сервис
+- `status_router.sh` - показывает состояние сервиса, `ip rule`, `nftables` и последние логи
 - `.env.example` - шаблон переменных без секретов
 
-## Ограничения текущей версии
+## Что этот пакет не делает
 
-- прямой маршрут определяется по доменным suffix-правилам: `ru` и `xn--p1ai`;
-- IP-only трафик без доменного имени по умолчанию уходит через `Hysteria 2`;
-- если `Amnezia` пересоздаст контейнер, нужно просто снова запустить `install_router.sh`;
-- это минимальный production-oriented пакет, а не полная geosite/geoip-маршрутизация.
+- не устанавливает и не конфигурирует сам host-level `AmneziaWG` интерфейс;
+- не генерирует AWG-конфиг;
+- не строит полную geosite/geoip-маршрутизацию.
+
+Он предполагает, что на сервере уже есть или скоро появится интерфейс `awg*`/`wg*`.
 
 ## Требования
 
 - Ubuntu/Debian сервер
-- установленный Docker
-- `nsenter` из `util-linux` на хосте
-- уже работающий контейнер `AmneziaWG`
 - root-доступ
 - рабочий `HY2_URI` для зарубежного `Hysteria 2`
+- host-level `AmneziaWG` или `WireGuard`-совместимый интерфейс `awg*`/`wg*`
+- пакеты `iproute2`, `nftables`, `systemd`
+- `sing-box` на хосте
+
+Если `sing-box` ещё не установлен, можно дать инсталлятору поставить его через apt:
+
+```bash
+sudo INSTALL_PACKAGES=1 bash install_router.sh
+```
 
 ## Быстрый старт
 
@@ -46,31 +58,44 @@ $EDITOR .env
 sudo bash install_router.sh
 ```
 
-Или можно передать отдельный env-файл:
+Или с отдельным env-файлом:
 
 ```bash
 sudo bash install_router.sh --env-file /root/hp2-router.env
 ```
 
 После запуска скрипт:
-- определит контейнер `AmneziaWG` и интерфейс `awg*`/`wg*`;
-- подготовит нужные `net.ipv4.*` в network namespace контейнера через `nsenter`;
+
+- определит host интерфейс `awg*`/`wg*`, если `AWG_IFACE` не задан явно;
 - сгенерирует `sing-box` конфиг в `/opt/hp2-router/config/config.json`;
-- соберет образ `hp2-router:latest`;
-- запустит контейнер `hp2-router` в режиме `--network container:<detected-container>`.
+- запишет runtime env в `/opt/hp2-router/service.env`;
+- скопирует `entrypoint.sh` в `/opt/hp2-router/bin/router-entrypoint.sh`;
+- создаст unit `/etc/systemd/system/hp2-router.service`;
+- выполнит `sing-box check` и запустит сервис.
 
 `config.json` содержит секреты `Hysteria 2` и создается с правами `0600`.
-Файл с исходными переменными по умолчанию не сохраняется. Если он нужен, включите `SAVE_STATE_ENV=1`.
-По умолчанию `sing-box` использует явный upstream DNS `77.88.8.8:53`, а не `local` resolver внутри docker namespace.
+Полный env со значениями по умолчанию не сохраняется, если не включать `SAVE_STATE_ENV=1`.
+
+## Host-level AWG
+
+Самый практичный вариант - поднять `AmneziaWG` как обычный системный интерфейс, а не через GUI self-hosted Docker install.
+
+Обычно это означает:
+
+- установить `amneziawg-tools` или другой совместимый toolkit;
+- положить конфиг в `/etc/amnezia/amnezia-awg.conf` или аналогичный путь;
+- поднимать интерфейс через `awg-quick up awg0` либо systemd unit для AWG;
+- убедиться, что на хосте появляется `awg0`.
+
+Этот пакет начинает работать после того, как интерфейс существует или когда вы явно задаёте `AWG_IFACE`.
 
 ## Дополнительные параметры
 
-Можно переопределить:
+Пример:
 
 ```bash
 sudo \
-  AMNEZIA_CONTAINER='your-amnezia-container' \
-  CONTAINER_NAME='hp2-router' \
+  SERVICE_NAME='hp2-router' \
   AWG_IFACE='awg0' \
   DIRECT_SUFFIXES='ru,xn--p1ai' \
   EXTRA_DIRECT_DOMAINS='gosuslugi.ru,ya.ru' \
@@ -79,21 +104,22 @@ sudo \
 ```
 
 Описание:
+
 - `HY2_URI` - URI второго хопа `Hysteria 2`
 - `INPUT_ENV_FILE` - путь к env-файлу, если не используете `--env-file`
-- `AMNEZIA_CONTAINER` - override имени контейнера `AmneziaWG`, если auto-detect не подходит
-- `CONTAINER_NAME` - имя sidecar-контейнера
-- `AWG_IFACE` - override интерфейса внутри контейнера `AmneziaWG`
+- `SERVICE_NAME` - имя `systemd`-сервиса, по умолчанию `hp2-router`
+- `AWG_IFACE` - host interface `awg*`/`wg*`
 - `DNS_SERVER` - upstream DNS сервер для `sing-box`
 - `DNS_SERVER_PORT` - порт upstream DNS
 - `DNS_STRATEGY` - стратегия DNS (`prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`)
 - `DEBUG_SOCKS_PORT` - временный SOCKS inbound для отладки `hy2-out`
+- `INSTALL_PACKAGES=1` - установить `sing-box` и `nftables` через apt
 - `DIRECT_SUFFIXES` - доменные suffixes, которые идут напрямую
 - `EXTRA_DIRECT_DOMAINS` - точные домены, которые всегда идут напрямую
 - `EXTRA_DIRECT_SUFFIXES` - дополнительные suffixes для прямого маршрута
 - `SAVE_STATE_ENV=1` - сохранить эффективные параметры в `/opt/hp2-router/router.env`
 
-Если running-кандидатов с `awg*`/`wg*` интерфейсом несколько, скрипт остановится и попросит явно указать `AMNEZIA_CONTAINER=...`.
+Если `AWG_IFACE` задан явно, но интерфейс пока не поднят, install не падает. Сервис подождёт его появления до `WAIT_TIMEOUT`.
 
 ## Формат `.env`
 
@@ -109,10 +135,11 @@ HY2_URI='hy2://password@example.com:443/?sni=example.com&obfs=salamander&obfs-pa
 
 ```bash
 sudo bash status_router.sh
-docker logs -f hp2-router
+systemctl status hp2-router.service --no-pager
+journalctl -u hp2-router.service -f
 ```
 
-Если надо посмотреть конфиг:
+Если нужно посмотреть конфиг:
 
 ```bash
 sudo sed -n '1,240p' /opt/hp2-router/config/config.json
@@ -120,51 +147,46 @@ sudo sed -n '1,240p' /opt/hp2-router/config/config.json
 
 ## Удаление
 
-Удалить только контейнер:
+Удалить сервис, unit и правила:
 
 ```bash
 sudo bash remove_router.sh
 ```
 
-Удалить контейнер, образ и конфиг:
+Удалить ещё и каталог конфигурации:
 
 ```bash
-sudo REMOVE_IMAGE=1 PURGE_CONFIG=1 bash remove_router.sh
+sudo PURGE_CONFIG=1 bash remove_router.sh
 ```
 
 ## Как это работает
 
-`entrypoint.sh` внутри sidecar:
-- ждет появления интерфейса `awg*`/`wg*`;
-- пытается включить `ip_forward`, отключить `rp_filter` и включить `src_valid_mark`, но не падает, если это уже подготовлено на хосте;
-- создает `ip rule` и `local route` для `fwmark`;
-- перехватывает DNS (`53/tcp`, `53/udp`) до проверки RFC1918, чтобы DNS внутри VPN-подсети тоже уходил в `sing-box`;
-- создает `nftables` `TPROXY` rule только для трафика, который приходит через найденный `awg*`/`wg*`;
+`entrypoint.sh` на хосте:
+
+- ждёт появления интерфейса `awg*`/`wg*`;
+- включает `ip_forward`, отключает `rp_filter` и включает `src_valid_mark`;
+- создаёт `ip rule` и `local route` для `fwmark`;
+- перехватывает DNS (`53/tcp`, `53/udp`) до проверки RFC1918, чтобы DNS внутри VPN тоже шёл в `sing-box`;
+- создаёт `nftables` `TPROXY` rule только для трафика, который приходит через `AWG_IFACE`;
 - запускает `sing-box`.
 
 `sing-box`:
+
 - перехватывает TCP/UDP через `tproxy`;
 - sniff'ит протоколы;
-- DNS hijack матчится по `protocol=dns` или `port=53`, чтобы UDP/53 не выпадал из DNS-модуля;
-- использует явный upstream DNS вместо `local` resolver внутри контейнера;
+- DNS hijack матчится по `protocol=dns` или `port=53`;
+- использует явный upstream DNS;
 - отправляет `.ru` и `.рф` напрямую;
-- DNS-запросы hijack'ит в локальный DNS модуль;
-- все остальное маршрутизирует в `Hysteria 2`.
+- всё остальное отправляет в `Hysteria 2`.
 
 ## Отладка второго хопа
 
-Если нужно изолированно проверить `hy2-out`, включите временный SOCKS inbound:
+Если нужно проверить `hy2-out` отдельно от `TPROXY`, включите временный SOCKS inbound:
 
 ```bash
 echo "DEBUG_SOCKS_PORT='1080'" >> .env
 sudo bash install_router.sh
-```
-
-Потом найдите IP контейнера `AmneziaWG` на сети `amn0` и проверьте выход через SOCKS:
-
-```bash
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker ps --format '{{.Names}}' | while read -r c; do docker exec "$c" sh -lc 'for dev in /sys/class/net/*; do dev="${dev##*/}"; case "$dev" in awg*|wg*) exit 0;; esac; done; exit 1' >/dev/null 2>&1 && echo "$c"; done | head -n1)"
-curl --socks5-hostname http://<AMNEZIA_CONTAINER_IP>:1080 https://api.ipify.org --max-time 15
+curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 ```
 
 Если этот запрос работает, значит `hy2-out` исправен, а проблема остаётся в transparent-routing логике.
@@ -172,5 +194,5 @@ curl --socks5-hostname http://<AMNEZIA_CONTAINER_IP>:1080 https://api.ipify.org 
 ## Что стоит улучшить позже
 
 - заменить suffix-only роутинг на полноценные `rule_set` для российских сервисов;
-- добавить `systemd`-обвязку на хосте для автоперезапуска после пересоздания `Amnezia` контейнера;
-- добавить отдельный healthcheck и smoke-test маршрутизации.
+- добавить healthcheck для маршрутизации;
+- автоматизировать раскладку host-level `AmneziaWG` конфигурации рядом с этим пакетом.

@@ -39,19 +39,19 @@ wait_for_interface() {
 
 setup_sysctls() {
   if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
-    warn "Could not set net.ipv4.ip_forward inside container; assuming it was prepared on the host"
+    warn "Could not set net.ipv4.ip_forward in the current namespace"
   fi
   if ! sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null 2>&1; then
-    warn "Could not set net.ipv4.conf.all.rp_filter inside container; assuming it was prepared on the host"
+    warn "Could not set net.ipv4.conf.all.rp_filter in the current namespace"
   fi
   if ! sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null 2>&1; then
-    warn "Could not set net.ipv4.conf.default.rp_filter inside container; assuming it was prepared on the host"
+    warn "Could not set net.ipv4.conf.default.rp_filter in the current namespace"
   fi
   if ! sysctl -w net.ipv4.conf.all.src_valid_mark=1 >/dev/null 2>&1; then
-    warn "Could not set net.ipv4.conf.all.src_valid_mark inside container; assuming it was prepared on the host"
+    warn "Could not set net.ipv4.conf.all.src_valid_mark in the current namespace"
   fi
   if ! sysctl -w "net.ipv4.conf.${AWG_IFACE}.rp_filter=0" >/dev/null 2>&1; then
-    warn "Could not set net.ipv4.conf.${AWG_IFACE}.rp_filter inside container; assuming it was prepared on the host"
+    warn "Could not set net.ipv4.conf.${AWG_IFACE}.rp_filter in the current namespace"
   fi
 }
 

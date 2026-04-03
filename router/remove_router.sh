@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="${CONTAINER_NAME:-hp2-router}"
-IMAGE_NAME="${IMAGE_NAME:-hp2-router:latest}"
+SERVICE_NAME="${SERVICE_NAME:-hp2-router}"
 WORK_DIR="${WORK_DIR:-/opt/hp2-router}"
-REMOVE_IMAGE="${REMOVE_IMAGE:-0}"
 PURGE_CONFIG="${PURGE_CONFIG:-0}"
+ROUTER_TABLE="${ROUTER_TABLE:-100}"
+ROUTER_MARK="${ROUTER_MARK:-0x1}"
+NFT_TABLE="${NFT_TABLE:-hp2router}"
 
 log() {
   echo "[+] $*"
@@ -26,24 +27,36 @@ require_root() {
   fi
 }
 
+cleanup_rules() {
+  set +e
+  while ip rule del fwmark "${ROUTER_MARK}" table "${ROUTER_TABLE}" >/dev/null 2>&1; do
+    :
+  done
+  nft delete table ip "${NFT_TABLE}" >/dev/null 2>&1 || true
+  set -e
+}
+
 main() {
+  local unit_name="${SERVICE_NAME%.service}.service"
+  local unit_file="/etc/systemd/system/${unit_name}"
+
   require_root
 
-  if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
-    log "Removing container ${CONTAINER_NAME}"
-    docker rm -f "${CONTAINER_NAME}" >/dev/null
+  if [[ -f "${unit_file}" ]]; then
+    log "Stopping service ${unit_name}"
+    systemctl disable --now "${unit_name}" >/dev/null 2>&1 || true
   else
-    warn "Container ${CONTAINER_NAME} does not exist"
+    warn "Service ${unit_name} is not installed"
   fi
 
-  if [[ "${REMOVE_IMAGE}" == "1" ]]; then
-    if docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
-      log "Removing image ${IMAGE_NAME}"
-      docker rmi "${IMAGE_NAME}" >/dev/null
-    else
-      warn "Image ${IMAGE_NAME} does not exist"
-    fi
+  if [[ -f "${unit_file}" ]]; then
+    log "Removing unit file ${unit_file}"
+    rm -f "${unit_file}"
+    systemctl daemon-reload
   fi
+
+  log "Cleaning routing rules"
+  cleanup_rules
 
   if [[ "${PURGE_CONFIG}" == "1" ]]; then
     log "Removing config directory ${WORK_DIR}"
