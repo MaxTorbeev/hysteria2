@@ -4,8 +4,8 @@
 
 Схема:
 - клиент подключается к российскому серверу через `AmneziaWG`;
-- `AmneziaWG` живет в docker-контейнере `amnezia-awg2`;
-- sidecar-контейнер делит с ним network namespace, видит `awg0`, поднимает `TPROXY` и запускает `sing-box`;
+- `AmneziaWG` живет в docker-контейнере, который инсталлятор определяет автоматически;
+- sidecar-контейнер делит с ним network namespace, видит `awg*`/`wg*`, поднимает `TPROXY` и запускает `sing-box`;
 - домены в зонах `.ru` и `.рф` отправляются напрямую;
 - остальной трафик уходит на зарубежный `Hysteria 2`.
 
@@ -22,14 +22,15 @@
 
 - прямой маршрут определяется по доменным suffix-правилам: `ru` и `xn--p1ai`;
 - IP-only трафик без доменного имени по умолчанию уходит через `Hysteria 2`;
-- если `Amnezia` пересоздаст контейнер `amnezia-awg2`, нужно просто снова запустить `install_router.sh`;
+- если `Amnezia` пересоздаст контейнер, нужно просто снова запустить `install_router.sh`;
 - это минимальный production-oriented пакет, а не полная geosite/geoip-маршрутизация.
 
 ## Требования
 
 - Ubuntu/Debian сервер
 - установленный Docker
-- уже работающий контейнер `AmneziaWG` (`amnezia-awg2` по умолчанию)
+- `nsenter` из `util-linux` на хосте
+- уже работающий контейнер `AmneziaWG`
 - root-доступ
 - рабочий `HY2_URI` для зарубежного `Hysteria 2`
 
@@ -52,10 +53,11 @@ sudo bash install_router.sh --env-file /root/hp2-router.env
 ```
 
 После запуска скрипт:
-- проверит контейнер `amnezia-awg2`;
+- определит контейнер `AmneziaWG` и интерфейс `awg*`/`wg*`;
+- подготовит нужные `net.ipv4.*` в network namespace контейнера через `nsenter`;
 - сгенерирует `sing-box` конфиг в `/opt/hp2-router/config/config.json`;
 - соберет образ `hp2-router:latest`;
-- запустит контейнер `hp2-router` в режиме `--network container:amnezia-awg2`.
+- запустит контейнер `hp2-router` в режиме `--network container:<detected-container>`.
 
 `config.json` содержит секреты `Hysteria 2` и создается с правами `0600`.
 Файл с исходными переменными по умолчанию не сохраняется. Если он нужен, включите `SAVE_STATE_ENV=1`.
@@ -66,7 +68,7 @@ sudo bash install_router.sh --env-file /root/hp2-router.env
 
 ```bash
 sudo \
-  AMNEZIA_CONTAINER='amnezia-awg2' \
+  AMNEZIA_CONTAINER='your-amnezia-container' \
   CONTAINER_NAME='hp2-router' \
   AWG_IFACE='awg0' \
   DIRECT_SUFFIXES='ru,xn--p1ai' \
@@ -78,13 +80,15 @@ sudo \
 Описание:
 - `HY2_URI` - URI второго хопа `Hysteria 2`
 - `INPUT_ENV_FILE` - путь к env-файлу, если не используете `--env-file`
-- `AMNEZIA_CONTAINER` - имя контейнера `AmneziaWG`
+- `AMNEZIA_CONTAINER` - override имени контейнера `AmneziaWG`, если auto-detect не подходит
 - `CONTAINER_NAME` - имя sidecar-контейнера
-- `AWG_IFACE` - интерфейс внутри контейнера `AmneziaWG`
+- `AWG_IFACE` - override интерфейса внутри контейнера `AmneziaWG`
 - `DIRECT_SUFFIXES` - доменные suffixes, которые идут напрямую
 - `EXTRA_DIRECT_DOMAINS` - точные домены, которые всегда идут напрямую
 - `EXTRA_DIRECT_SUFFIXES` - дополнительные suffixes для прямого маршрута
 - `SAVE_STATE_ENV=1` - сохранить эффективные параметры в `/opt/hp2-router/router.env`
+
+Если running-кандидатов с `awg*`/`wg*` интерфейсом несколько, скрипт остановится и попросит явно указать `AMNEZIA_CONTAINER=...`.
 
 ## Формат `.env`
 
@@ -126,10 +130,10 @@ sudo REMOVE_IMAGE=1 PURGE_CONFIG=1 bash remove_router.sh
 ## Как это работает
 
 `entrypoint.sh` внутри sidecar:
-- ждет появления `awg0`;
-- включает `ip_forward`, отключает `rp_filter`, включает `src_valid_mark`;
+- ждет появления интерфейса `awg*`/`wg*`;
+- пытается включить `ip_forward`, отключить `rp_filter` и включить `src_valid_mark`, но не падает, если это уже подготовлено на хосте;
 - создает `ip rule` и `local route` для `fwmark`;
-- создает `nftables` `TPROXY` rule только для трафика, который приходит через `awg0`;
+- создает `nftables` `TPROXY` rule только для трафика, который приходит через найденный `awg*`/`wg*`;
 - запускает `sing-box`.
 
 `sing-box`:

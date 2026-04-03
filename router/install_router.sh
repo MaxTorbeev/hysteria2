@@ -62,11 +62,11 @@ If present, router/.env is loaded automatically.
 Optional variables:
   HY2_URI              Hysteria2 URI. Optional if present in env file.
   INPUT_ENV_FILE       Env file to source before applying defaults.
-  AMNEZIA_CONTAINER   Docker container with AmneziaWG (default: amnezia-awg2)
+  AMNEZIA_CONTAINER   Docker container with AmneziaWG (auto-detected if empty)
   CONTAINER_NAME      Router sidecar container name (default: hp2-router)
   IMAGE_NAME          Docker image tag (default: hp2-router:latest)
   WORK_DIR            Where config/env files are stored (default: /opt/hp2-router)
-  AWG_IFACE           WireGuard interface inside the Amnezia container (default: awg0)
+  AWG_IFACE           WireGuard interface inside the Amnezia container (auto-detected if empty)
   DIRECT_SUFFIXES     Domain suffixes routed directly, comma-separated (default: ru,xn--p1ai)
   EXTRA_DIRECT_DOMAINS   Exact domains routed directly, comma-separated
   EXTRA_DIRECT_SUFFIXES  Extra domain suffixes routed directly, comma-separated
@@ -134,8 +134,8 @@ apply_defaults() {
 
   IMAGE_NAME="${IMAGE_NAME:-hp2-router:latest}"
   CONTAINER_NAME="${CONTAINER_NAME:-hp2-router}"
-  AMNEZIA_CONTAINER="${AMNEZIA_CONTAINER:-amnezia-awg2}"
-  AWG_IFACE="${AWG_IFACE:-awg0}"
+  AMNEZIA_CONTAINER="${AMNEZIA_CONTAINER:-}"
+  AWG_IFACE="${AWG_IFACE:-}"
 
   TPROXY_PORT="${TPROXY_PORT:-60080}"
   ROUTER_TABLE="${ROUTER_TABLE:-100}"
@@ -256,10 +256,118 @@ parse_hy2_uri() {
   [[ -n "${HYSTERIA_SNI}" ]] || HYSTERIA_SNI="${HYSTERIA_SERVER}"
 }
 
-ensure_amnezia_container() {
+container_has_vpn_iface() {
+  local container="$1"
+  docker exec "${container}" sh -lc '
+    for dev in /sys/class/net/*; do
+      dev="${dev##*/}"
+      case "${dev}" in
+        awg*|wg*)
+          exit 0
+          ;;
+      esac
+    done
+    exit 1
+  ' >/dev/null 2>&1
+}
+
+detect_amnezia_container() {
+  local name image lower_info
+  local -a candidates=()
+  local -a preferred=()
+
+  while IFS=$'\t' read -r name image; do
+    [[ -n "${name}" ]] || continue
+    if container_has_vpn_iface "${name}"; then
+      candidates+=("${name}")
+      lower_info="${name,,} ${image,,}"
+      if [[ "${lower_info}" =~ amnezia|awg|wireguard ]]; then
+        preferred+=("${name}")
+      fi
+    fi
+  done < <(docker ps --format '{{.Names}}	{{.Image}}')
+
+  if (( ${#preferred[@]} == 1 )); then
+    AMNEZIA_CONTAINER="${preferred[0]}"
+    return 0
+  fi
+
+  if (( ${#candidates[@]} == 1 )); then
+    AMNEZIA_CONTAINER="${candidates[0]}"
+    return 0
+  fi
+
+  if (( ${#preferred[@]} > 1 )); then
+    die "Multiple Amnezia-like containers detected: ${preferred[*]}. Set AMNEZIA_CONTAINER explicitly."
+  fi
+
+  if (( ${#candidates[@]} > 1 )); then
+    die "Multiple containers with awg/wg interfaces detected: ${candidates[*]}. Set AMNEZIA_CONTAINER explicitly."
+  fi
+
+  die "Could not auto-detect an AmneziaWG container. Set AMNEZIA_CONTAINER explicitly."
+}
+
+resolve_amnezia_container() {
+  if [[ -z "${AMNEZIA_CONTAINER}" ]]; then
+    detect_amnezia_container
+    log "Detected Amnezia container: ${AMNEZIA_CONTAINER}"
+  fi
+
   docker inspect "${AMNEZIA_CONTAINER}" >/dev/null 2>&1 || die "Container not found: ${AMNEZIA_CONTAINER}"
   [[ "$(docker inspect -f '{{.State.Running}}' "${AMNEZIA_CONTAINER}")" == "true" ]] || die "Container is not running: ${AMNEZIA_CONTAINER}"
-  docker exec "${AMNEZIA_CONTAINER}" ip link show dev "${AWG_IFACE}" >/dev/null 2>&1 || die "Interface ${AWG_IFACE} not found inside ${AMNEZIA_CONTAINER}"
+}
+
+detect_awg_iface() {
+  local iface
+  iface="$(docker exec "${AMNEZIA_CONTAINER}" sh -lc '
+    for dev in /sys/class/net/*; do
+      dev="${dev##*/}"
+      case "${dev}" in
+        awg*)
+          echo "${dev}"
+          exit 0
+          ;;
+      esac
+    done
+    for dev in /sys/class/net/*; do
+      dev="${dev##*/}"
+      case "${dev}" in
+        wg*)
+          echo "${dev}"
+          exit 0
+          ;;
+      esac
+    done
+    exit 1
+  ' 2>/dev/null || true)"
+
+  [[ -n "${iface}" ]] || die "Could not auto-detect awg/wg interface inside ${AMNEZIA_CONTAINER}. Set AWG_IFACE explicitly."
+  AWG_IFACE="${iface}"
+}
+
+resolve_awg_iface() {
+  if [[ -z "${AWG_IFACE}" ]]; then
+    detect_awg_iface
+    log "Detected WireGuard interface: ${AWG_IFACE}"
+    return 0
+  fi
+
+  docker exec "${AMNEZIA_CONTAINER}" sh -lc '
+    target="$1"
+    for dev in /sys/class/net/*; do
+      dev="${dev##*/}"
+      if [ "${dev}" = "${target}" ]; then
+        exit 0
+      fi
+    done
+    exit 1
+  ' sh "${AWG_IFACE}" >/dev/null 2>&1 || die "Interface ${AWG_IFACE} not found inside ${AMNEZIA_CONTAINER}"
+}
+
+ensure_amnezia_container() {
+  resolve_amnezia_container
+  resolve_awg_iface
 }
 
 render_config() {
@@ -427,6 +535,25 @@ build_image() {
   docker build -t "${IMAGE_NAME}" "${SCRIPT_DIR}"
 }
 
+prepare_namespace_sysctls() {
+  local pid
+
+  require_cmd nsenter
+  require_cmd sysctl
+
+  pid="$(docker inspect -f '{{.State.Pid}}' "${AMNEZIA_CONTAINER}")"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || die "Could not determine PID for ${AMNEZIA_CONTAINER}"
+  (( pid > 1 )) || die "Unexpected PID for ${AMNEZIA_CONTAINER}: ${pid}"
+
+  log "Preparing network namespace sysctls for ${AMNEZIA_CONTAINER} (pid ${pid})"
+
+  nsenter -t "${pid}" -n sysctl -w net.ipv4.ip_forward=1 >/dev/null
+  nsenter -t "${pid}" -n sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null
+  nsenter -t "${pid}" -n sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null
+  nsenter -t "${pid}" -n sysctl -w net.ipv4.conf.all.src_valid_mark=1 >/dev/null
+  nsenter -t "${pid}" -n sysctl -w "net.ipv4.conf.${AWG_IFACE}.rp_filter=0" >/dev/null
+}
+
 remove_existing_container() {
   if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
     log "Removing existing container ${CONTAINER_NAME}"
@@ -505,6 +632,7 @@ main() {
     write_env_file
   fi
   build_image
+  prepare_namespace_sysctls
   remove_existing_container
   run_router
   print_summary

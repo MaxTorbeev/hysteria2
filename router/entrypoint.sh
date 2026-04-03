@@ -13,6 +13,10 @@ log() {
   echo "[router] $*"
 }
 
+warn() {
+  echo "[router:warn] $*" >&2
+}
+
 die() {
   echo "[router:x] $*" >&2
   exit 1
@@ -34,11 +38,21 @@ wait_for_interface() {
 }
 
 setup_sysctls() {
-  sysctl -w net.ipv4.ip_forward=1 >/dev/null
-  sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null || true
-  sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null || true
-  sysctl -w net.ipv4.conf.all.src_valid_mark=1 >/dev/null || true
-  sysctl -w "net.ipv4.conf.${AWG_IFACE}.rp_filter=0" >/dev/null || true
+  if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
+    warn "Could not set net.ipv4.ip_forward inside container; assuming it was prepared on the host"
+  fi
+  if ! sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null 2>&1; then
+    warn "Could not set net.ipv4.conf.all.rp_filter inside container; assuming it was prepared on the host"
+  fi
+  if ! sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null 2>&1; then
+    warn "Could not set net.ipv4.conf.default.rp_filter inside container; assuming it was prepared on the host"
+  fi
+  if ! sysctl -w net.ipv4.conf.all.src_valid_mark=1 >/dev/null 2>&1; then
+    warn "Could not set net.ipv4.conf.all.src_valid_mark inside container; assuming it was prepared on the host"
+  fi
+  if ! sysctl -w "net.ipv4.conf.${AWG_IFACE}.rp_filter=0" >/dev/null 2>&1; then
+    warn "Could not set net.ipv4.conf.${AWG_IFACE}.rp_filter inside container; assuming it was prepared on the host"
+  fi
 }
 
 cleanup_rules() {
