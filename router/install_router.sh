@@ -23,6 +23,9 @@ ROUTER_MARK=""
 NFT_TABLE=""
 WAIT_TIMEOUT=""
 LOG_LEVEL=""
+DNS_SERVER=""
+DNS_SERVER_PORT=""
+DNS_STRATEGY=""
 
 DIRECT_SUFFIXES=""
 EXTRA_DIRECT_DOMAINS=""
@@ -70,6 +73,9 @@ Optional variables:
   DIRECT_SUFFIXES     Domain suffixes routed directly, comma-separated (default: ru,xn--p1ai)
   EXTRA_DIRECT_DOMAINS   Exact domains routed directly, comma-separated
   EXTRA_DIRECT_SUFFIXES  Extra domain suffixes routed directly, comma-separated
+  DNS_SERVER           Upstream DNS server for sing-box (default: 77.88.8.8)
+  DNS_SERVER_PORT      Upstream DNS port (default: 53)
+  DNS_STRATEGY         DNS strategy (default: prefer_ipv4)
   SAVE_STATE_ENV      Set to 1 to save effective settings to WORK_DIR/router.env
 EOF
 }
@@ -143,6 +149,9 @@ apply_defaults() {
   NFT_TABLE="${NFT_TABLE:-hp2router}"
   WAIT_TIMEOUT="${WAIT_TIMEOUT:-30}"
   LOG_LEVEL="${LOG_LEVEL:-info}"
+  DNS_SERVER="${DNS_SERVER:-77.88.8.8}"
+  DNS_SERVER_PORT="${DNS_SERVER_PORT:-53}"
+  DNS_STRATEGY="${DNS_STRATEGY:-prefer_ipv4}"
 
   DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-ru,xn--p1ai}"
   EXTRA_DIRECT_DOMAINS="${EXTRA_DIRECT_DOMAINS:-}"
@@ -425,11 +434,12 @@ EOF
   domain_resolver_block=$(cat <<'EOF'
       ,
       "domain_resolver": {
-        "server": "local-dns",
-        "strategy": "prefer_ipv4"
+        "server": "dns-direct",
+        "strategy": "__DNS_STRATEGY__"
       }
 EOF
 )
+  domain_resolver_block="${domain_resolver_block//__DNS_STRATEGY__/$(printf '%s' "${DNS_STRATEGY}")}"
 
   mkdir -p "${CONFIG_DIR}"
   chmod 0700 "${WORK_DIR}" "${CONFIG_DIR}"
@@ -443,12 +453,14 @@ EOF
   "dns": {
     "servers": [
       {
-        "type": "local",
-        "tag": "local-dns"
+        "type": "udp",
+        "tag": "dns-direct",
+        "server": $(json_quote "${DNS_SERVER}"),
+        "server_port": ${DNS_SERVER_PORT}
       }
     ],
-    "final": "local-dns",
-    "strategy": "prefer_ipv4"
+    "final": "dns-direct",
+    "strategy": $(json_quote "${DNS_STRATEGY}")
   },
   "inbounds": [
     {
@@ -482,8 +494,8 @@ EOF
   "route": {
     "auto_detect_interface": true,
     "default_domain_resolver": {
-      "server": "local-dns",
-      "strategy": "prefer_ipv4"
+      "server": "dns-direct",
+      "strategy": $(json_quote "${DNS_STRATEGY}")
     },
     "rules": [
       {
@@ -526,6 +538,9 @@ ROUTER_TABLE=$(printf '%q' "${ROUTER_TABLE}")
 ROUTER_MARK=$(printf '%q' "${ROUTER_MARK}")
 NFT_TABLE=$(printf '%q' "${NFT_TABLE}")
 WAIT_TIMEOUT=$(printf '%q' "${WAIT_TIMEOUT}")
+DNS_SERVER=$(printf '%q' "${DNS_SERVER}")
+DNS_SERVER_PORT=$(printf '%q' "${DNS_SERVER_PORT}")
+DNS_STRATEGY=$(printf '%q' "${DNS_STRATEGY}")
 DIRECT_SUFFIXES=$(printf '%q' "${DIRECT_SUFFIXES}")
 EXTRA_DIRECT_DOMAINS=$(printf '%q' "${EXTRA_DIRECT_DOMAINS}")
 EXTRA_DIRECT_SUFFIXES=$(printf '%q' "${EXTRA_DIRECT_SUFFIXES}")

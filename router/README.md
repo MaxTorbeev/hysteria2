@@ -61,6 +61,7 @@ sudo bash install_router.sh --env-file /root/hp2-router.env
 
 `config.json` содержит секреты `Hysteria 2` и создается с правами `0600`.
 Файл с исходными переменными по умолчанию не сохраняется. Если он нужен, включите `SAVE_STATE_ENV=1`.
+По умолчанию `sing-box` использует явный upstream DNS `77.88.8.8:53`, а не `local` resolver внутри docker namespace.
 
 ## Дополнительные параметры
 
@@ -83,6 +84,9 @@ sudo \
 - `AMNEZIA_CONTAINER` - override имени контейнера `AmneziaWG`, если auto-detect не подходит
 - `CONTAINER_NAME` - имя sidecar-контейнера
 - `AWG_IFACE` - override интерфейса внутри контейнера `AmneziaWG`
+- `DNS_SERVER` - upstream DNS сервер для `sing-box`
+- `DNS_SERVER_PORT` - порт upstream DNS
+- `DNS_STRATEGY` - стратегия DNS (`prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`)
 - `DIRECT_SUFFIXES` - доменные suffixes, которые идут напрямую
 - `EXTRA_DIRECT_DOMAINS` - точные домены, которые всегда идут напрямую
 - `EXTRA_DIRECT_SUFFIXES` - дополнительные suffixes для прямого маршрута
@@ -141,6 +145,7 @@ sudo REMOVE_IMAGE=1 PURGE_CONFIG=1 bash remove_router.sh
 - перехватывает TCP/UDP через `tproxy`;
 - sniff'ит протоколы;
 - DNS hijack матчится по `protocol=dns` или `port=53`, чтобы UDP/53 не выпадал из DNS-модуля;
+- использует явный upstream DNS вместо `local` resolver внутри контейнера;
 - отправляет `.ru` и `.рф` напрямую;
 - DNS-запросы hijack'ит в локальный DNS модуль;
 - все остальное маршрутизирует в `Hysteria 2`.
