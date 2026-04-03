@@ -26,6 +26,13 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
+dump_cmd() {
+  local title="$1"
+  shift
+  log "${title}"
+  "$@" 2>&1 | sed 's/^/[router] /'
+}
+
 wait_for_interface() {
   local i
   for ((i = 0; i < WAIT_TIMEOUT; i++)); do
@@ -72,10 +79,25 @@ setup_rules() {
 
   nft add table ip "${NFT_TABLE}"
   nft "add chain ip ${NFT_TABLE} prerouting { type filter hook prerouting priority mangle; policy accept; }"
-  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" udp dport 53 tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
-  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" tcp dport 53 tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
-  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } return
-  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" meta l4proto { tcp, udp } tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
+  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" udp dport 53 counter tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
+  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" tcp dport 53 counter tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
+  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } counter return
+  nft add rule ip "${NFT_TABLE}" prerouting iifname "${AWG_IFACE}" meta l4proto { tcp, udp } counter tproxy to :"${TPROXY_PORT}" meta mark set "${ROUTER_MARK}" accept
+}
+
+log_runtime_state() {
+  dump_cmd "sing-box version" sing-box version
+  dump_cmd "Interface link" ip -br link show dev "${AWG_IFACE}"
+  dump_cmd "Interface address" ip -br addr show dev "${AWG_IFACE}"
+  dump_cmd "Relevant sysctls" sysctl \
+    net.ipv4.ip_forward \
+    net.ipv4.conf.all.rp_filter \
+    net.ipv4.conf.default.rp_filter \
+    net.ipv4.conf.all.src_valid_mark \
+    "net.ipv4.conf.${AWG_IFACE}.rp_filter"
+  dump_cmd "Policy rules" ip rule show
+  dump_cmd "Policy table ${ROUTER_TABLE}" ip route show table "${ROUTER_TABLE}"
+  dump_cmd "NFT table ${NFT_TABLE}" nft list table ip "${NFT_TABLE}"
 }
 
 main() {
@@ -92,6 +114,7 @@ main() {
 
   log "Applying TPROXY rules"
   setup_rules
+  log_runtime_state
 
   log "Validating sing-box config"
   sing-box check -c "${CONFIG_FILE}"

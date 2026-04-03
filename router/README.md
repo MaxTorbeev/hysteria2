@@ -21,6 +21,7 @@ Client -> AmneziaWG (host) -> TPROXY -> sing-box -> direct (.ru/.рф)
 - `entrypoint.sh` - настраивает `TPROXY` и запускает `sing-box` на хосте
 - `remove_router.sh` - останавливает и удаляет `systemd`-сервис
 - `status_router.sh` - показывает состояние сервиса, `ip rule`, `nftables` и последние логи
+- `debug_router.sh` - собирает полный диагностический bundle в лог-файл
 - `.env.example` - шаблон переменных без секретов
 
 ## Что этот пакет не делает
@@ -67,6 +68,7 @@ sudo bash install_router.sh --env-file /root/hp2-router.env
 После запуска скрипт:
 
 - определит host интерфейс `awg*`/`wg*`, если `AWG_IFACE` не задан явно;
+- если интерфейс ещё не поднят, возьмёт fallback `awg0` и поставит сервис в ожидание;
 - сгенерирует `sing-box` конфиг в `/opt/hp2-router/config/config.json`;
 - запишет runtime env в `/opt/hp2-router/service.env`;
 - скопирует `entrypoint.sh` в `/opt/hp2-router/bin/router-entrypoint.sh`;
@@ -75,6 +77,7 @@ sudo bash install_router.sh --env-file /root/hp2-router.env
 
 `config.json` содержит секреты `Hysteria 2` и создается с правами `0600`.
 Полный env со значениями по умолчанию не сохраняется, если не включать `SAVE_STATE_ENV=1`.
+Инсталлятор пишет лог в `/opt/hp2-router/logs/install.log`.
 
 ## Host-level AWG
 
@@ -109,6 +112,7 @@ sudo \
 - `INPUT_ENV_FILE` - путь к env-файлу, если не используете `--env-file`
 - `SERVICE_NAME` - имя `systemd`-сервиса, по умолчанию `hp2-router`
 - `AWG_IFACE` - host interface `awg*`/`wg*`
+- `DEFAULT_AWG_IFACE` - fallback имя интерфейса, если host-level AWG ещё не поднят
 - `DNS_SERVER` - upstream DNS сервер для `sing-box`
 - `DNS_SERVER_PORT` - порт upstream DNS
 - `DNS_STRATEGY` - стратегия DNS (`prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`)
@@ -120,6 +124,7 @@ sudo \
 - `SAVE_STATE_ENV=1` - сохранить эффективные параметры в `/opt/hp2-router/router.env`
 
 Если `AWG_IFACE` задан явно, но интерфейс пока не поднят, install не падает. Сервис подождёт его появления до `WAIT_TIMEOUT`.
+Если `AWG_IFACE` не задан и интерфейс не найден, installer использует `DEFAULT_AWG_IFACE=awg0`.
 
 ## Формат `.env`
 
@@ -135,6 +140,7 @@ HY2_URI='hy2://password@example.com:443/?sni=example.com&obfs=salamander&obfs-pa
 
 ```bash
 sudo bash status_router.sh
+sudo bash debug_router.sh
 systemctl status hp2-router.service --no-pager
 journalctl -u hp2-router.service -f
 ```
@@ -167,7 +173,8 @@ sudo PURGE_CONFIG=1 bash remove_router.sh
 - включает `ip_forward`, отключает `rp_filter` и включает `src_valid_mark`;
 - создаёт `ip rule` и `local route` для `fwmark`;
 - перехватывает DNS (`53/tcp`, `53/udp`) до проверки RFC1918, чтобы DNS внутри VPN тоже шёл в `sing-box`;
-- создаёт `nftables` `TPROXY` rule только для трафика, который приходит через `AWG_IFACE`;
+- создаёт `nftables` `TPROXY` rule со `counter`, чтобы по `status_router.sh` было видно реальный трафик;
+- пишет стартовую диагностику: `sing-box version`, `sysctl`, `ip rule`, `route table`, `nft`;
 - запускает `sing-box`.
 
 `sing-box`:
@@ -190,6 +197,17 @@ curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 ```
 
 Если этот запрос работает, значит `hy2-out` исправен, а проблема остаётся в transparent-routing логике.
+
+## Логи и отладка
+
+Основные места:
+
+- install log: `/opt/hp2-router/logs/install.log`
+- runtime log: `journalctl -u hp2-router.service -f`
+- быстрый статус: `sudo bash status_router.sh`
+- полный bundle: `sudo bash debug_router.sh`
+
+`debug_router.sh` сохраняет snapshot в `/opt/hp2-router/logs/debug-YYYYmmdd-HHMMSS.log`.
 
 ## Что стоит улучшить позже
 

@@ -14,11 +14,14 @@ BIN_DIR=""
 ENTRYPOINT_FILE=""
 SERVICE_ENV_FILE=""
 STATE_ENV_FILE=""
+LOG_DIR=""
+INSTALL_LOG_FILE=""
 
 SERVICE_NAME=""
 UNIT_NAME=""
 SYSTEMD_UNIT_FILE=""
 AWG_IFACE=""
+DEFAULT_AWG_IFACE=""
 
 TPROXY_PORT=""
 ROUTER_TABLE=""
@@ -79,6 +82,7 @@ Optional variables:
   DNS_SERVER             Upstream DNS server for sing-box (default: 77.88.8.8)
   DNS_SERVER_PORT        Upstream DNS port (default: 53)
   DNS_STRATEGY           DNS strategy (default: prefer_ipv4)
+  DEFAULT_AWG_IFACE      Fallback interface name when host awg/wg is not up yet (default: awg0)
   DEBUG_SOCKS_PORT       Optional SOCKS inbound for debugging hy2-out directly
   INSTALL_PACKAGES       Set to 1 to install sing-box and nftables via apt
   SAVE_STATE_ENV         Set to 1 to save effective settings to WORK_DIR/router.env
@@ -152,10 +156,13 @@ apply_defaults() {
   ENTRYPOINT_FILE="${ENTRYPOINT_FILE:-${BIN_DIR}/router-entrypoint.sh}"
   SERVICE_ENV_FILE="${SERVICE_ENV_FILE:-${WORK_DIR}/service.env}"
   STATE_ENV_FILE="${STATE_ENV_FILE:-${WORK_DIR}/router.env}"
+  LOG_DIR="${LOG_DIR:-${WORK_DIR}/logs}"
+  INSTALL_LOG_FILE="${INSTALL_LOG_FILE:-${LOG_DIR}/install.log}"
 
   SERVICE_NAME="${SERVICE_NAME:-hp2-router}"
   normalize_service_name
   AWG_IFACE="${AWG_IFACE:-}"
+  DEFAULT_AWG_IFACE="${DEFAULT_AWG_IFACE:-awg0}"
 
   TPROXY_PORT="${TPROXY_PORT:-60080}"
   ROUTER_TABLE="${ROUTER_TABLE:-100}"
@@ -174,6 +181,16 @@ apply_defaults() {
   EXTRA_DIRECT_SUFFIXES="${EXTRA_DIRECT_SUFFIXES:-}"
   SAVE_STATE_ENV="${SAVE_STATE_ENV:-0}"
   HY2_URI="${HY2_URI:-${POSITIONAL_HY2_URI}}"
+}
+
+setup_install_logging() {
+  [[ "${INSTALL_LOGGING_READY:-0}" == "1" ]] && return 0
+  mkdir -p "${WORK_DIR}" "${LOG_DIR}"
+  chmod 0700 "${WORK_DIR}" "${LOG_DIR}"
+  exec > >(tee -a "${INSTALL_LOG_FILE}") 2>&1
+  INSTALL_LOGGING_READY=1
+  export INSTALL_LOGGING_READY
+  log "Install log: ${INSTALL_LOG_FILE}"
 }
 
 trim() {
@@ -298,6 +315,7 @@ detect_awg_iface() {
     esac
   done
   if [[ -z "${iface}" ]]; then
+    shopt -s nullglob
     for dev in /sys/class/net/*; do
       dev="${dev##*/}"
       case "${dev}" in
@@ -307,9 +325,20 @@ detect_awg_iface() {
           ;;
       esac
     done
+    shopt -u nullglob
   fi
-  [[ -n "${iface}" ]] || die "Could not auto-detect a host awg/wg interface. Start host-level AmneziaWG first or set AWG_IFACE explicitly."
-  AWG_IFACE="${iface}"
+  if [[ -n "${iface}" ]]; then
+    AWG_IFACE="${iface}"
+    return 0
+  fi
+
+  if [[ -n "${DEFAULT_AWG_IFACE}" ]]; then
+    AWG_IFACE="${DEFAULT_AWG_IFACE}"
+    warn "Could not auto-detect a host awg/wg interface. Falling back to ${AWG_IFACE}; the service will wait for it."
+    return 0
+  fi
+
+  die "Could not auto-detect a host awg/wg interface. Start host-level AmneziaWG first or set AWG_IFACE explicitly."
 }
 
 resolve_awg_iface() {
@@ -532,7 +561,10 @@ SYSTEMD_UNIT_FILE=$(printf '%q' "${SYSTEMD_UNIT_FILE}")
 WORK_DIR=$(printf '%q' "${WORK_DIR}")
 CONFIG_FILE=$(printf '%q' "${CONFIG_FILE}")
 SERVICE_ENV_FILE=$(printf '%q' "${SERVICE_ENV_FILE}")
+LOG_DIR=$(printf '%q' "${LOG_DIR}")
+INSTALL_LOG_FILE=$(printf '%q' "${INSTALL_LOG_FILE}")
 AWG_IFACE=$(printf '%q' "${AWG_IFACE}")
+DEFAULT_AWG_IFACE=$(printf '%q' "${DEFAULT_AWG_IFACE}")
 TPROXY_PORT=$(printf '%q' "${TPROXY_PORT}")
 ROUTER_TABLE=$(printf '%q' "${ROUTER_TABLE}")
 ROUTER_MARK=$(printf '%q' "${ROUTER_MARK}")
@@ -568,6 +600,9 @@ ExecStart=${ENTRYPOINT_FILE}
 Restart=on-failure
 RestartSec=3
 User=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${SERVICE_NAME}
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 NoNewPrivileges=false
@@ -622,6 +657,7 @@ Runtime env:
 ${state_env_note}Main commands:
   systemctl status ${UNIT_NAME} --no-pager
   journalctl -u ${UNIT_NAME} -f
+  bash ${SCRIPT_DIR}/debug_router.sh
   bash ${SCRIPT_DIR}/status_router.sh
 
 Notes:
@@ -636,6 +672,7 @@ main() {
   require_root
   load_env_file
   apply_defaults
+  setup_install_logging
 
   if [[ -z "${HY2_URI}" ]]; then
     usage
