@@ -26,6 +26,7 @@ LOG_LEVEL=""
 DNS_SERVER=""
 DNS_SERVER_PORT=""
 DNS_STRATEGY=""
+DEBUG_SOCKS_PORT=""
 
 DIRECT_SUFFIXES=""
 EXTRA_DIRECT_DOMAINS=""
@@ -76,6 +77,7 @@ Optional variables:
   DNS_SERVER           Upstream DNS server for sing-box (default: 77.88.8.8)
   DNS_SERVER_PORT      Upstream DNS port (default: 53)
   DNS_STRATEGY         DNS strategy (default: prefer_ipv4)
+  DEBUG_SOCKS_PORT     Optional SOCKS inbound for debugging hy2-out directly
   SAVE_STATE_ENV      Set to 1 to save effective settings to WORK_DIR/router.env
 EOF
 }
@@ -152,6 +154,7 @@ apply_defaults() {
   DNS_SERVER="${DNS_SERVER:-77.88.8.8}"
   DNS_SERVER_PORT="${DNS_SERVER_PORT:-53}"
   DNS_STRATEGY="${DNS_STRATEGY:-prefer_ipv4}"
+  DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-}"
 
   DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-ru,xn--p1ai}"
   EXTRA_DIRECT_DOMAINS="${EXTRA_DIRECT_DOMAINS:-}"
@@ -385,6 +388,7 @@ render_config() {
   local suffix_rule=""
   local obfs_block=""
   local domain_resolver_block=""
+  local debug_socks_inbound=""
 
   direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SNI}")"
   direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SERVER}")"
@@ -441,6 +445,20 @@ EOF
 )
   domain_resolver_block="${domain_resolver_block//__DNS_STRATEGY__/$(printf '%s' "${DNS_STRATEGY}")}"
 
+  if [[ -n "${DEBUG_SOCKS_PORT}" ]]; then
+    [[ "${DEBUG_SOCKS_PORT}" =~ ^[0-9]+$ ]] || die "DEBUG_SOCKS_PORT must be numeric"
+    debug_socks_inbound=$(cat <<EOF
+    ,
+    {
+      "type": "socks",
+      "tag": "debug-socks",
+      "listen": "0.0.0.0",
+      "listen_port": ${DEBUG_SOCKS_PORT}
+    }
+EOF
+)
+  fi
+
   mkdir -p "${CONFIG_DIR}"
   chmod 0700 "${WORK_DIR}" "${CONFIG_DIR}"
 
@@ -468,7 +486,7 @@ EOF
       "tag": "tproxy-in",
       "listen": "0.0.0.0",
       "listen_port": ${TPROXY_PORT}
-    }
+    }${debug_socks_inbound}
   ],
   "outbounds": [
     {
@@ -541,6 +559,7 @@ WAIT_TIMEOUT=$(printf '%q' "${WAIT_TIMEOUT}")
 DNS_SERVER=$(printf '%q' "${DNS_SERVER}")
 DNS_SERVER_PORT=$(printf '%q' "${DNS_SERVER_PORT}")
 DNS_STRATEGY=$(printf '%q' "${DNS_STRATEGY}")
+DEBUG_SOCKS_PORT=$(printf '%q' "${DEBUG_SOCKS_PORT}")
 DIRECT_SUFFIXES=$(printf '%q' "${DIRECT_SUFFIXES}")
 EXTRA_DIRECT_DOMAINS=$(printf '%q' "${EXTRA_DIRECT_DOMAINS}")
 EXTRA_DIRECT_SUFFIXES=$(printf '%q' "${EXTRA_DIRECT_SUFFIXES}")

@@ -87,6 +87,7 @@ sudo \
 - `DNS_SERVER` - upstream DNS сервер для `sing-box`
 - `DNS_SERVER_PORT` - порт upstream DNS
 - `DNS_STRATEGY` - стратегия DNS (`prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`)
+- `DEBUG_SOCKS_PORT` - временный SOCKS inbound для отладки `hy2-out`
 - `DIRECT_SUFFIXES` - доменные suffixes, которые идут напрямую
 - `EXTRA_DIRECT_DOMAINS` - точные домены, которые всегда идут напрямую
 - `EXTRA_DIRECT_SUFFIXES` - дополнительные suffixes для прямого маршрута
@@ -149,6 +150,24 @@ sudo REMOVE_IMAGE=1 PURGE_CONFIG=1 bash remove_router.sh
 - отправляет `.ru` и `.рф` напрямую;
 - DNS-запросы hijack'ит в локальный DNS модуль;
 - все остальное маршрутизирует в `Hysteria 2`.
+
+## Отладка второго хопа
+
+Если нужно изолированно проверить `hy2-out`, включите временный SOCKS inbound:
+
+```bash
+echo "DEBUG_SOCKS_PORT='1080'" >> .env
+sudo bash install_router.sh
+```
+
+Потом найдите IP контейнера `AmneziaWG` на сети `amn0` и проверьте выход через SOCKS:
+
+```bash
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker ps --format '{{.Names}}' | while read -r c; do docker exec "$c" sh -lc 'for dev in /sys/class/net/*; do dev="${dev##*/}"; case "$dev" in awg*|wg*) exit 0;; esac; done; exit 1' >/dev/null 2>&1 && echo "$c"; done | head -n1)"
+curl --socks5-hostname http://<AMNEZIA_CONTAINER_IP>:1080 https://api.ipify.org --max-time 15
+```
+
+Если этот запрос работает, значит `hy2-out` исправен, а проблема остаётся в transparent-routing логике.
 
 ## Что стоит улучшить позже
 
