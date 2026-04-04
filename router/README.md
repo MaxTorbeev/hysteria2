@@ -145,6 +145,7 @@ curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 - Текущий routing-layer рассчитан на клиентские профили с `AllowedIPs = 0.0.0.0/0`.
 - Для этой схемы лучше использовать `DNS = 10.66.66.1` в клиентском профиле, чтобы DNS тоже уходил в transparent path.
 - По умолчанию routing-layer поднимает локальный `dnsmasq`-фильтр и режет `HTTPS,SVCB` DNS records, чтобы клиенты меньше залипали на `QUIC`.
+- По умолчанию installer добавляет локальное `INPUT ACCEPT` правило для `awg0`, потому что `sing-box auto_redirect` превращает клиентский TCP в локальные соединения к служебному порту, и `UFW` иначе их дропает.
 - Debug SOCKS по умолчанию слушает `127.0.0.1:1080` и полезен для изолированной проверки `hy2-out`.
 - По умолчанию exact YouTube-домены заданы вручную в `VPN_DOMAINS`, а из `iplist` тянутся только wildcard-домены.
 - Чтобы поменять policy, используйте `ROUTE_FINAL`, `VPN_DOMAINS`, `VPN_SUFFIXES`, `IPLIST_DOMAINS_URL`, `IPLIST_WILDCARD_DOMAINS_URL`, `DIRECT_SUFFIXES`, `EXTRA_DIRECT_DOMAINS`, `EXTRA_DIRECT_SUFFIXES` в `.env`.

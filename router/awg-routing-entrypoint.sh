@@ -15,6 +15,7 @@ DNS_FILTER_ENABLED="${DNS_FILTER_ENABLED:-0}"
 DNS_FILTER_CONFIG_FILE="${DNS_FILTER_CONFIG_FILE:-/etc/dnsmasq.conf}"
 DNS_FILTER_LISTEN="${DNS_FILTER_LISTEN:-127.0.0.1}"
 DNS_FILTER_PORT="${DNS_FILTER_PORT:-5353}"
+ALLOW_AWG_INPUT="${ALLOW_AWG_INPUT:-1}"
 
 log() {
   echo "[routing] $*"
@@ -52,6 +53,15 @@ setup_sysctls() {
   sysctl -w "net.ipv4.conf.${AWG_IFACE}.rp_filter=0" >/dev/null || warn "Could not set net.ipv4.conf.${AWG_IFACE}.rp_filter"
 }
 
+allow_awg_input() {
+  [[ "${ALLOW_AWG_INPUT}" == "1" ]] || return 0
+  require_cmd iptables
+  if ! iptables -C INPUT -i "${AWG_IFACE}" -j ACCEPT >/dev/null 2>&1; then
+    log "Allowing local INPUT from ${AWG_IFACE}"
+    iptables -I INPUT 1 -i "${AWG_IFACE}" -j ACCEPT
+  fi
+}
+
 log_runtime_state() {
   log "AWG interface state"
   ip -br addr show dev "${AWG_IFACE}" 2>&1 | sed 's/^/[routing] /'
@@ -81,6 +91,7 @@ main() {
 
   log "Applying kernel settings"
   setup_sysctls
+  allow_awg_input
 
   if [[ "${DNS_FILTER_ENABLED}" == "1" ]]; then
     require_cmd dnsmasq
