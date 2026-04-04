@@ -1,17 +1,21 @@
 # AmneziaWG Bootstrap With wiresock/amneziawg-install
 
-Этот каталог теперь содержит новый bootstrap-пакет для **чистого сервера**.
+Этот каталог теперь содержит bootstrap-пакет для **чистого сервера** и отдельный routing-layer поверх уже поднятого `AWG`.
 
 Он больше не использует старую схему с `TPROXY`, `sing-box`, sidecar-контейнерами или миграцией из dockerized `Amnezia`.
 Вместо этого installer опирается на [`wiresock/amneziawg-install`](https://github.com/wiresock/amneziawg-install) и поднимает:
 
 - `AmneziaWG` на сервере;
 - веб-панель через `amneziawg-web.sh install`.
+- отдельный host-level routing layer через `sing-box + TPROXY + Hysteria2`.
 
 ## Что входит
 
 - `install_awg_stack.sh` - основной installer для нового чистого сервера
 - `status_awg_stack.sh` - быстрый статус для `AmneziaWG` и панели
+- `install_awg_routing.sh` - companion installer для маршрутизации `.ru` напрямую и остального трафика через `Hysteria2`
+- `status_awg_routing.sh` - быстрый статус routing-сервиса
+- `awg-routing-entrypoint.sh` - runtime-логика для `TPROXY`, `nftables`, `ip rule` и `sing-box`
 - `.env.example` - шаблон переменных для неинтерактивного запуска
 
 ## Что делает installer
@@ -92,6 +96,43 @@ ss -ltnp | grep 8080 || true
 
 - install log: `/opt/hp2-awg-stack/logs/install.log`
 - state file: `/opt/hp2-awg-stack/stack.env`
+
+## Routing Layer
+
+После того как `AWG` уже поднят и работает на хосте, можно поставить маршрутизацию:
+
+```bash
+cd router
+sudo bash install_awg_routing.sh
+```
+
+Installer:
+
+- ставит `sing-box` и `nftables`, если это включено;
+- генерирует host-level `sing-box` config;
+- создаёт systemd unit `hp2-routing.service`;
+- настраивает `TPROXY` и policy routing только для трафика, который приходит через `AWG_IFACE`;
+- отправляет `.ru` и `.рф` напрямую;
+- всё остальное отправляет в `Hysteria2`.
+
+Для routing-layer нужен `HY2_URI` в `.env` или в аргументе:
+
+```bash
+sudo HY2_URI='hy2://password@example.com:443/?sni=example.com&obfs=salamander&obfs-password=secret' bash install_awg_routing.sh
+```
+
+Статус:
+
+```bash
+sudo bash status_awg_routing.sh
+journalctl -u hp2-routing.service -f
+```
+
+Для изолированной проверки второго хопа:
+
+```bash
+curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
+```
 
 ## Что удалено
 

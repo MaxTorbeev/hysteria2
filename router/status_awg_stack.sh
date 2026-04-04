@@ -22,7 +22,7 @@ systemctl status "awg-quick@${SERVER_AWG_NIC}.service" --no-pager || true
 echo
 
 echo "== panel status =="
-if [[ -x "${WIRESOCK_REPO_DIR}/amneziawg-web.sh" ]]; then
+if [[ -f "${WIRESOCK_REPO_DIR}/amneziawg-web.sh" ]]; then
   (
     cd "${WIRESOCK_REPO_DIR}"
     bash ./amneziawg-web.sh status
