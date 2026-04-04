@@ -1,0 +1,13 @@
+# local-service-name<TAB>iplist-group
+# If a service is absent here, update_blocked_domains.sh uses the same
+# value for both service name and iplist group.
+
+youtube	youtube
+instagram	instagram
+facebook	facebook
+openai	openai
+reddit	reddit
+whatsapp	whatsapp
+telegram	telegram
+x	x
+twitter	x

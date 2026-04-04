@@ -1,0 +1,2 @@
+# Exact domains that must always go through hy2-out.
+# One domain per line.

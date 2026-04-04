@@ -16,6 +16,12 @@
 - `install_awg_routing.sh` - companion installer для маршрутизации `.ru` напрямую и остального трафика через `Hysteria2`
 - `status_awg_routing.sh` - быстрый статус routing-сервиса
 - `awg-routing-entrypoint.sh` - runtime-логика для host-level `sing-box`, sysctl и runtime-диагностики
+- `render_awg_routing_config.sh` - отдельный builder, который собирает итоговый `sing-box` config из `.env`, manual lists и generated lists
+- `update_blocked_domains.sh` - отдельный updater, который читает `blocked_services.txt`, скачивает exact/wildcard domains из `iplist`, обновляет generated blocklist и при изменениях перерендеривает config
+- `config/domains/blocked_domains.txt` - ручной exact-list доменов через `hy2-out`
+- `config/domains/blocked_suffixes.txt` - ручной suffix-list доменов через `hy2-out`
+- `config/domains/blocked_services.txt` - список сервисов, для которых нужно скачать полный набор доменов из `iplist`
+- `config/domains/iplist_groups.tsv` - mapping `local service -> iplist group`
 - `.env.example` - шаблон переменных для неинтерактивного запуска
 
 ## Что делает installer
@@ -120,6 +126,7 @@ Installer:
 - всё остальное оставляет напрямую.
 - при каждой переустановке routing-layer может подтягивать актуальные wildcard-домены YouTube из [iplist.opencck.org](https://iplist.opencck.org/ru/).
 - fetch из `iplist` теперь идёт с таймаутами и retry; по умолчанию при ошибке installer продолжает работу на встроенном списке доменов.
+- installer больше не собирает `config.json` сам: он ставит отдельные `render_awg_routing_config.sh` и `update_blocked_domains.sh`, а затем вызывает render-скрипт.
 
 Для routing-layer нужен `HY2_URI` в `.env` или в аргументе:
 
@@ -149,6 +156,16 @@ curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 - Debug SOCKS по умолчанию слушает `127.0.0.1:1080` и полезен для изолированной проверки `hy2-out`.
 - По умолчанию exact YouTube-домены заданы вручную в `VPN_DOMAINS`, а из `iplist` тянутся только wildcard-домены.
 - Чтобы поменять policy, используйте `ROUTE_FINAL`, `VPN_DOMAINS`, `VPN_SUFFIXES`, `IPLIST_DOMAINS_URL`, `IPLIST_WILDCARD_DOMAINS_URL`, `DIRECT_SUFFIXES`, `EXTRA_DIRECT_DOMAINS`, `EXTRA_DIRECT_SUFFIXES` в `.env`.
+- Для ручного server-side fallback есть два списка:
+  - `config/domains/blocked_domains.txt` для exact domains
+  - `config/domains/blocked_suffixes.txt` для suffixes
+- Для service-based fallback есть:
+  - `config/domains/blocked_services.txt` - список сервисов, которые нужно целиком скачать из `iplist`
+  - `config/domains/iplist_groups.tsv` - mapping `service -> group`
+  - `/opt/hp2-routing/blocked_domains.generated.txt` - generated exact-list
+  - `/opt/hp2-routing/blocked_suffixes.generated.txt` - generated suffix-list
+  - `/opt/hp2-routing/blocked_services.state.tsv` - state-файл с `service -> group`
+- `update_blocked_domains.sh` не меняет ручные файлы. Он читает `config/domains/blocked_services.txt`, скачивает домены из `iplist`, обновляет generated lists и, если что-то изменилось, заново запускает `render_awg_routing_config.sh` и перезапускает routing service.
 - Чтобы отключить `iplist`, задайте `IPLIST_DOMAINS_URL=''` и `IPLIST_WILDCARD_DOMAINS_URL=''`.
 - Чтобы падать при недоступности `iplist`, задайте `IPLIST_STRICT='1'`.
 - Если клиентский веб-трафик уходит в `QUIC` и не открывает страницы, можно принудительно включить TCP fallback:
@@ -166,6 +183,30 @@ DNS_FILTER_RR_TYPES='HTTPS,SVCB'
 ```
 
 Тогда `sing-box` будет резолвить домены через локальный `dnsmasq`, который не отдаёт клиентам `HTTPS/SVCB` ответы и уменьшает вероятность повторного выбора `QUIC`.
+- Для ручного обновления generated blocklist:
+
+```bash
+sudo bash update_blocked_domains.sh
+```
+
+- Чтобы добавить сервис целиком через `iplist`, запишите его имя в `config/domains/blocked_services.txt`. Например:
+
+```text
+youtube
+instagram
+openai
+```
+
+После этого updater сам скачает для каждого сервиса:
+- exact domains в `blocked_domains.generated.txt`
+- wildcard/suffix domains в `blocked_suffixes.generated.txt`
+
+- Для ручного рендера конфига без полной переустановки:
+
+```bash
+sudo bash render_awg_routing_config.sh
+sudo systemctl restart hp2-routing.service
+```
 - Для полного туннеля через `Hysteria2` без доменных условий задайте:
 
 ```bash

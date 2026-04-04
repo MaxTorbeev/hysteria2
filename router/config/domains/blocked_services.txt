@@ -1,0 +1,6 @@
+# Service names to expand from iplist groups.
+# One service per line.
+
+youtube
+whatsapp
+telegram

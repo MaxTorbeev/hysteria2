@@ -1,0 +1,2 @@
+# Domain suffixes that must always go through hy2-out.
+# One suffix per line, without leading "*.".
