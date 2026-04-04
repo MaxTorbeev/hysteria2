@@ -118,7 +118,7 @@ Installer:
 - отбрасывает `UDP/443`, `853` и `STUN`, чтобы браузеры и приложения не зависали на `QUIC/DoQ` в transparent-режиме;
 - по умолчанию отправляет только YouTube-связанные домены через `Hysteria2`;
 - всё остальное оставляет напрямую.
-- при каждой переустановке routing-layer может подтягивать актуальные YouTube-домены из [iplist.opencck.org](https://iplist.opencck.org/ru/).
+- при каждой переустановке routing-layer может подтягивать актуальные wildcard-домены YouTube из [iplist.opencck.org](https://iplist.opencck.org/ru/).
 - fetch из `iplist` теперь идёт с таймаутами и retry; по умолчанию при ошибке installer продолжает работу на встроенном списке доменов.
 
 Для routing-layer нужен `HY2_URI` в `.env` или в аргументе:
@@ -145,6 +145,7 @@ curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 - Текущий routing-layer рассчитан на клиентские профили с `AllowedIPs = 0.0.0.0/0`.
 - Для этой схемы лучше использовать `DNS = 10.66.66.1` в клиентском профиле, чтобы DNS тоже уходил в transparent path.
 - Debug SOCKS по умолчанию слушает `127.0.0.1:1080` и полезен для изолированной проверки `hy2-out`.
+- По умолчанию exact YouTube-домены заданы вручную в `VPN_DOMAINS`, а из `iplist` тянутся только wildcard-домены.
 - Чтобы поменять policy, используйте `VPN_DOMAINS`, `VPN_SUFFIXES`, `IPLIST_DOMAINS_URL`, `IPLIST_WILDCARD_DOMAINS_URL`, `DIRECT_SUFFIXES`, `EXTRA_DIRECT_DOMAINS`, `EXTRA_DIRECT_SUFFIXES` в `.env`.
 - Чтобы отключить `iplist`, задайте `IPLIST_DOMAINS_URL=''` и `IPLIST_WILDCARD_DOMAINS_URL=''`.
 - Чтобы падать при недоступности `iplist`, задайте `IPLIST_STRICT='1'`.
