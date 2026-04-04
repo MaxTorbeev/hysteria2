@@ -148,15 +148,26 @@ install_dependencies() {
 checkout_repo() {
   if [[ -d "${WIRESOCK_REPO_DIR}/.git" ]]; then
     log "Updating ${WIRESOCK_REPO_DIR}"
-    git -C "${WIRESOCK_REPO_DIR}" fetch --tags origin
-  else
+    if ! git -C "${WIRESOCK_REPO_DIR}" rev-parse --git-dir >/dev/null 2>&1 ||
+       ! git -C "${WIRESOCK_REPO_DIR}" fetch --tags origin; then
+      warn "Existing checkout is broken, recreating ${WIRESOCK_REPO_DIR}"
+      rm -rf "${WIRESOCK_REPO_DIR}"
+    fi
+  fi
+
+  if [[ ! -d "${WIRESOCK_REPO_DIR}/.git" ]]; then
     log "Cloning ${WIRESOCK_REPO_URL} -> ${WIRESOCK_REPO_DIR}"
     git clone "${WIRESOCK_REPO_URL}" "${WIRESOCK_REPO_DIR}"
   fi
 
   log "Checking out ${WIRESOCK_REF}"
   git -C "${WIRESOCK_REPO_DIR}" checkout "${WIRESOCK_REF}"
-  git -C "${WIRESOCK_REPO_DIR}" pull --ff-only origin "${WIRESOCK_REF}" || true
+  if ! git -C "${WIRESOCK_REPO_DIR}" pull --ff-only origin "${WIRESOCK_REF}"; then
+    warn "Checkout update failed, recreating ${WIRESOCK_REPO_DIR}"
+    rm -rf "${WIRESOCK_REPO_DIR}"
+    git clone "${WIRESOCK_REPO_URL}" "${WIRESOCK_REPO_DIR}"
+    git -C "${WIRESOCK_REPO_DIR}" checkout "${WIRESOCK_REF}"
+  fi
 }
 
 run_awg_install() {
