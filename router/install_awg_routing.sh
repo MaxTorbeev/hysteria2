@@ -368,7 +368,12 @@ merge_remote_domain_lists() {
       while IFS= read -r line; do
         line="$(trim "${line}")"
         [[ -n "${line}" ]] || continue
-        line="${line#*.}"
+        # iplist wildcard output already contains usable suffixes like
+        # "googlevideo.com"; only strip an optional leading "*." or ".".
+        case "${line}" in
+          \*.*) line="${line#*.}" ;;
+          .*) line="${line#.}" ;;
+        esac
         wildcard_suffixes="$(add_csv_item "${wildcard_suffixes}" "${line}")"
       done <<< "${wildcard_lines}"
       VPN_SUFFIXES="$(add_csv_item "${VPN_SUFFIXES}" "${wildcard_suffixes}")"
