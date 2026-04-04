@@ -31,7 +31,7 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-30}"
 LOG_LEVEL="${LOG_LEVEL:-debug}"
 DNS_SERVER="${DNS_SERVER:-77.88.8.8}"
 DNS_SERVER_PORT="${DNS_SERVER_PORT:-53}"
-DNS_STRATEGY="${DNS_STRATEGY:-prefer_ipv4}"
+DNS_STRATEGY="${DNS_STRATEGY:-ipv4_only}"
 DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-1080}"
 INSTALL_ROUTING_PACKAGES="${INSTALL_ROUTING_PACKAGES:-1}"
 
@@ -311,6 +311,7 @@ render_config() {
   local direct_domains=""
   local domain_rule=""
   local suffix_rule=""
+  local reject_rule=""
   local obfs_block=""
   local debug_socks_inbound=""
 
@@ -318,6 +319,27 @@ render_config() {
   if ! is_ip_literal "${HYSTERIA_SERVER}"; then
     direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SERVER}")"
   fi
+
+  reject_rule=$(cat <<'EOF'
+      {
+        "type": "logical",
+        "mode": "or",
+        "rules": [
+          {
+            "port": 853
+          },
+          {
+            "network": "udp",
+            "port": 443
+          },
+          {
+            "protocol": "stun"
+          }
+        ],
+        "action": "reject"
+      },
+EOF
+)
   direct_domains="$(add_csv_item "${direct_domains}" "${EXTRA_DIRECT_DOMAINS}")"
 
   if [[ -n "${direct_domains//,/}" ]]; then
@@ -442,7 +464,7 @@ EOF
         "port": 53,
         "action": "hijack-dns"
       },
-${domain_rule}${suffix_rule}      {
+${reject_rule}${domain_rule}${suffix_rule}      {
         "ip_is_private": true,
         "action": "route",
         "outbound": "direct"

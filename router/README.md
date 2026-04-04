@@ -2,8 +2,8 @@
 
 Этот каталог теперь содержит bootstrap-пакет для **чистого сервера** и отдельный routing-layer поверх уже поднятого `AWG`.
 
-Он больше не использует старую схему с `TPROXY`, `sing-box`, sidecar-контейнерами или миграцией из dockerized `Amnezia`.
-Вместо этого installer опирается на [`wiresock/amneziawg-install`](https://github.com/wiresock/amneziawg-install) и поднимает:
+Он больше не использует старую docker-sidecar схему с `TPROXY`, `sing-box` и миграцией из dockerized `Amnezia`.
+Вместо этого bootstrap опирается на [`wiresock/amneziawg-install`](https://github.com/wiresock/amneziawg-install) и поднимает:
 
 - `AmneziaWG` на сервере;
 - веб-панель через `amneziawg-web.sh install`.
@@ -77,6 +77,7 @@ sudo bash install_awg_stack.sh --env-file /root/hp2-awg-stack.env
 - `ALLOWED_IPS` - allowed IPs в клиентских конфигах
 - `AWG_WEB_LISTEN` - адрес панели, по умолчанию `127.0.0.1:8080`
 - `AWG_WEB_PUBLIC_BASE_URL` - внешний URL панели, если он нужен
+- `DNS_STRATEGY=ipv4_only` - рекомендуемый режим для transparent routing через `AWG`, чтобы клиент не зависал на IPv6
 
 ## Проверка
 
@@ -112,6 +113,8 @@ Installer:
 - генерирует host-level `sing-box` config;
 - создаёт systemd unit `hp2-routing.service`;
 - настраивает `TPROXY` и policy routing только для трафика, который приходит через `AWG_IFACE`;
+- по умолчанию форсирует `ipv4_only` для DNS внутри `sing-box`;
+- отбрасывает `UDP/443`, `853` и `STUN`, чтобы браузеры и приложения не зависали на `QUIC/DoQ` в transparent-режиме;
 - отправляет `.ru` и `.рф` напрямую;
 - всё остальное отправляет в `Hysteria2`.
 
