@@ -116,8 +116,9 @@ Installer:
 - использует штатные `ip rule`/`nftables` правила `sing-box`, а не самописный `TPROXY`;
 - по умолчанию форсирует `ipv4_only` для DNS внутри `sing-box`;
 - отбрасывает `UDP/443`, `853` и `STUN`, чтобы браузеры и приложения не зависали на `QUIC/DoQ` в transparent-режиме;
-- отправляет `.ru` и `.рф` напрямую;
-- всё остальное отправляет в `Hysteria2`.
+- по умолчанию отправляет только YouTube-связанные домены через `Hysteria2`;
+- всё остальное оставляет напрямую.
+- при каждой переустановке routing-layer может подтягивать актуальные YouTube-домены из [iplist.opencck.org](https://iplist.opencck.org/ru/).
 
 Для routing-layer нужен `HY2_URI` в `.env` или в аргументе:
 
@@ -143,3 +144,4 @@ curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 - Текущий routing-layer рассчитан на клиентские профили с `AllowedIPs = 0.0.0.0/0`.
 - Для этой схемы лучше использовать `DNS = 10.66.66.1` в клиентском профиле, чтобы DNS тоже уходил в transparent path.
 - Debug SOCKS по умолчанию слушает `127.0.0.1:1080` и полезен для изолированной проверки `hy2-out`.
+- Чтобы поменять policy, используйте `VPN_DOMAINS`, `VPN_SUFFIXES`, `IPLIST_DOMAINS_URL`, `IPLIST_WILDCARD_DOMAINS_URL`, `DIRECT_SUFFIXES`, `EXTRA_DIRECT_DOMAINS`, `EXTRA_DIRECT_SUFFIXES` в `.env`.

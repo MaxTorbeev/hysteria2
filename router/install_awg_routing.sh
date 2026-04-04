@@ -42,6 +42,10 @@ DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-1080}"
 INSTALL_ROUTING_PACKAGES="${INSTALL_ROUTING_PACKAGES:-1}"
 
 DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-ru,xn--p1ai}"
+VPN_DOMAINS="${VPN_DOMAINS:-youtubei.googleapis.com}"
+VPN_SUFFIXES="${VPN_SUFFIXES:-youtube.com,youtu.be,googlevideo.com,ytimg.com}"
+IPLIST_DOMAINS_URL="${IPLIST_DOMAINS_URL:-https://iplist.opencck.org/?format=text&data=domains&group=youtube}"
+IPLIST_WILDCARD_DOMAINS_URL="${IPLIST_WILDCARD_DOMAINS_URL:-https://iplist.opencck.org/?format=text&data=domains&group=youtube&wildcard=1}"
 EXTRA_DIRECT_DOMAINS="${EXTRA_DIRECT_DOMAINS:-}"
 EXTRA_DIRECT_SUFFIXES="${EXTRA_DIRECT_SUFFIXES:-}"
 SAVE_STATE_ENV="${SAVE_STATE_ENV:-1}"
@@ -95,6 +99,10 @@ Optional variables:
   DNS_STRATEGY                        DNS strategy (default: ipv4_only)
   DEBUG_SOCKS_LISTEN                  Debug SOCKS listen address (default: 127.0.0.1)
   DEBUG_SOCKS_PORT                    Debug SOCKS port (default: 1080)
+  VPN_DOMAINS                         Exact domains routed via Hysteria2.
+  VPN_SUFFIXES                        Domain suffixes routed via Hysteria2.
+  IPLIST_DOMAINS_URL                  Optional iplist URL with exact domains to merge into VPN_DOMAINS.
+  IPLIST_WILDCARD_DOMAINS_URL         Optional iplist URL with wildcard domains to merge into VPN_SUFFIXES.
   DIRECT_SUFFIXES                     Direct-routed suffixes (default: ru,xn--p1ai)
   EXTRA_DIRECT_DOMAINS                Extra direct exact domains.
   EXTRA_DIRECT_SUFFIXES               Extra direct suffixes.
@@ -207,6 +215,18 @@ add_csv_item() {
   fi
 }
 
+append_lines_to_csv() {
+  local current="$1"
+  local input="$2"
+  local line
+  while IFS= read -r line; do
+    line="$(trim "$line")"
+    [[ -n "${line}" ]] || continue
+    current="$(add_csv_item "${current}" "${line}")"
+  done <<< "${input}"
+  printf '%s' "${current}"
+}
+
 url_decode() {
   local data="${1//+/ }"
   printf '%b' "${data//%/\\x}"
@@ -299,6 +319,34 @@ detect_awg_iface() {
   fi
 }
 
+fetch_url_lines() {
+  local url="$1"
+  [[ -n "${url}" ]] || return 0
+  curl -fsSL "${url}" | tr -d '\r'
+}
+
+merge_remote_domain_lists() {
+  local exact_lines wildcard_lines wildcard_suffixes=""
+
+  if [[ -n "${IPLIST_DOMAINS_URL}" ]]; then
+    log "Fetching exact domains from ${IPLIST_DOMAINS_URL}"
+    exact_lines="$(fetch_url_lines "${IPLIST_DOMAINS_URL}")"
+    VPN_DOMAINS="$(append_lines_to_csv "${VPN_DOMAINS}" "${exact_lines}")"
+  fi
+
+  if [[ -n "${IPLIST_WILDCARD_DOMAINS_URL}" ]]; then
+    log "Fetching wildcard domains from ${IPLIST_WILDCARD_DOMAINS_URL}"
+    wildcard_lines="$(fetch_url_lines "${IPLIST_WILDCARD_DOMAINS_URL}")"
+    while IFS= read -r line; do
+      line="$(trim "${line}")"
+      [[ -n "${line}" ]] || continue
+      line="${line#*.}"
+      wildcard_suffixes="$(add_csv_item "${wildcard_suffixes}" "${line}")"
+    done <<< "${wildcard_lines}"
+    VPN_SUFFIXES="$(add_csv_item "${VPN_SUFFIXES}" "${wildcard_suffixes}")"
+  fi
+}
+
 install_dependencies() {
   [[ "${INSTALL_ROUTING_PACKAGES}" == "1" ]] || return 0
   require_cmd apt-get
@@ -327,6 +375,8 @@ render_config() {
   local direct_domains=""
   local domain_rule=""
   local suffix_rule=""
+  local vpn_domain_rule=""
+  local vpn_suffix_rule=""
   local reject_rule=""
   local obfs_block=""
   local debug_socks_inbound=""
@@ -364,6 +414,28 @@ EOF
         "domain": $(csv_to_json_array "${direct_domains}"),
         "action": "route",
         "outbound": "direct"
+      },
+EOF
+)
+  fi
+
+  if [[ -n "${VPN_DOMAINS//,/}" ]]; then
+    vpn_domain_rule=$(cat <<EOF
+      {
+        "domain": $(csv_to_json_array "${VPN_DOMAINS}"),
+        "action": "route",
+        "outbound": "hy2-out"
+      },
+EOF
+)
+  fi
+
+  if [[ -n "${VPN_SUFFIXES//,/}" ]]; then
+    vpn_suffix_rule=$(cat <<EOF
+      {
+        "domain_suffix": $(csv_to_json_array "${VPN_SUFFIXES}"),
+        "action": "route",
+        "outbound": "hy2-out"
       },
 EOF
 )
@@ -497,13 +569,13 @@ EOF
         "port": 53,
         "action": "hijack-dns"
       },
-${reject_rule}${domain_rule}${suffix_rule}      {
+${reject_rule}${vpn_domain_rule}${vpn_suffix_rule}${domain_rule}${suffix_rule}      {
         "ip_is_private": true,
         "action": "route",
         "outbound": "direct"
       }
     ],
-    "final": "hy2-out"
+    "final": "direct"
   }
 }
 EOF
@@ -625,8 +697,10 @@ main() {
   setup_logging
   install_dependencies
   require_cmd sing-box
+  require_cmd curl
   parse_hy2_uri "${HY2_URI}"
   detect_awg_iface
+  merge_remote_domain_lists
   render_config
   write_service_env
   write_state_env
