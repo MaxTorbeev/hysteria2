@@ -28,7 +28,7 @@ SERVER_AWG_IPV6="${SERVER_AWG_IPV6:-}"
 SERVER_PORT="${SERVER_PORT:-}"
 CLIENT_DNS_1="${CLIENT_DNS_1:-1.1.1.1}"
 CLIENT_DNS_2="${CLIENT_DNS_2:-1.0.0.1}"
-ALLOWED_IPS="${ALLOWED_IPS:-0.0.0.0/0,::/0}"
+ALLOWED_IPS="${ALLOWED_IPS:-0.0.0.0/0}"
 
 AWG_WEB_LISTEN="${AWG_WEB_LISTEN:-127.0.0.1:8080}"
 AWG_WEB_PUBLIC_BASE_URL="${AWG_WEB_PUBLIC_BASE_URL:-}"
@@ -77,7 +77,7 @@ Optional variables:
   SERVER_PORT             Optional server UDP port.
   CLIENT_DNS_1            Client DNS #1 (default: 1.1.1.1).
   CLIENT_DNS_2            Client DNS #2 (default: 1.0.0.1).
-  ALLOWED_IPS             Client allowed IPs (default: 0.0.0.0/0,::/0).
+  ALLOWED_IPS             Client allowed IPs (default: 0.0.0.0/0).
 
   AWG_WEB_LISTEN          Panel listen address (default: 127.0.0.1:8080).
   AWG_WEB_PUBLIC_BASE_URL Optional panel public base URL.

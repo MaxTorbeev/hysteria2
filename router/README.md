@@ -74,7 +74,7 @@ sudo bash install_awg_stack.sh --env-file /root/hp2-awg-stack.env
 - `SERVER_AWG_IPV6` - IPv6 сети VPN
 - `SERVER_PORT` - UDP порт сервера
 - `CLIENT_DNS_1`, `CLIENT_DNS_2` - DNS для клиентов
-- `ALLOWED_IPS` - allowed IPs в клиентских конфигах
+- `ALLOWED_IPS` - allowed IPs в клиентских конфигах; для текущего routing-layer по умолчанию только `0.0.0.0/0`
 - `AWG_WEB_LISTEN` - адрес панели, по умолчанию `127.0.0.1:8080`
 - `AWG_WEB_PUBLIC_BASE_URL` - внешний URL панели, если он нужен
 - `DNS_STRATEGY=ipv4_only` - рекомендуемый режим для transparent routing через `AWG`, чтобы клиент не зависал на IPv6
