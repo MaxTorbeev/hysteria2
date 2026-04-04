@@ -44,6 +44,7 @@ INSTALL_ROUTING_PACKAGES="${INSTALL_ROUTING_PACKAGES:-1}"
 DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-ru,xn--p1ai}"
 VPN_DOMAINS="${VPN_DOMAINS:-youtubei.googleapis.com,www.youtube.com,m.youtube.com,music.youtube.com}"
 VPN_SUFFIXES="${VPN_SUFFIXES:-youtube.com,youtu.be,googlevideo.com,ytimg.com}"
+ROUTE_FINAL="${ROUTE_FINAL:-direct}"
 IPLIST_DOMAINS_URL="${IPLIST_DOMAINS_URL:-}"
 IPLIST_WILDCARD_DOMAINS_URL="${IPLIST_WILDCARD_DOMAINS_URL:-https://iplist.opencck.org/?format=text&data=domains&group=youtube&wildcard=1}"
 IPLIST_CONNECT_TIMEOUT="${IPLIST_CONNECT_TIMEOUT:-5}"
@@ -105,6 +106,7 @@ Optional variables:
   DEBUG_SOCKS_PORT                    Debug SOCKS port (default: 1080)
   VPN_DOMAINS                         Exact domains routed via Hysteria2.
   VPN_SUFFIXES                        Domain suffixes routed via Hysteria2.
+  ROUTE_FINAL                         Final outbound for unmatched traffic: direct or hy2-out (default: direct)
   IPLIST_DOMAINS_URL                  Optional iplist URL with exact domains to merge into VPN_DOMAINS.
   IPLIST_WILDCARD_DOMAINS_URL         Optional iplist URL with wildcard domains to merge into VPN_SUFFIXES.
   IPLIST_CONNECT_TIMEOUT              curl --connect-timeout for iplist fetches (default: 5)
@@ -418,6 +420,16 @@ render_config() {
   local reject_rule=""
   local obfs_block=""
   local debug_socks_inbound=""
+  local route_final=""
+
+  case "${ROUTE_FINAL}" in
+    direct|hy2-out)
+      route_final="${ROUTE_FINAL}"
+      ;;
+    *)
+      die "Unsupported ROUTE_FINAL: ${ROUTE_FINAL} (expected: direct or hy2-out)"
+      ;;
+  esac
 
   direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SNI}")"
   if ! is_ip_literal "${HYSTERIA_SERVER}"; then
@@ -609,7 +621,7 @@ ${reject_rule}${vpn_domain_rule}${vpn_suffix_rule}${domain_rule}${suffix_rule}  
         "outbound": "direct"
       }
     ],
-    "final": "direct"
+    "final": $(json_quote "${route_final}")
   }
 }
 EOF
