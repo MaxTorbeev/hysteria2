@@ -1,2 +1,20 @@
 # Domain suffixes that must always go through hy2-out.
 # One suffix per line, without leading "*.".
+
+# WhatsApp
+wa.me
+whatsapp.com
+whatsapp.net
+
+# Instagram
+cdninstagram.com
+ig.me
+instagram.com
+
+# Telegram
+t.me
+telegra.ph
+telegram.me
+telegram.org
+tdesktop.com
+telesco.pe

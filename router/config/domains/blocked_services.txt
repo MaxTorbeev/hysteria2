@@ -2,5 +2,6 @@
 # One service per line.
 
 youtube
+instagram
 whatsapp
 telegram
