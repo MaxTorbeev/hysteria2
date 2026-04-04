@@ -14,6 +14,7 @@ BIN_DIR="${BIN_DIR:-${WORK_DIR}/bin}"
 ENTRYPOINT_FILE="${ENTRYPOINT_FILE:-${BIN_DIR}/awg-routing-entrypoint.sh}"
 SERVICE_ENV_FILE="${SERVICE_ENV_FILE:-${WORK_DIR}/service.env}"
 STATE_ENV_FILE="${STATE_ENV_FILE:-${WORK_DIR}/routing.env}"
+DNS_FILTER_CONFIG_FILE="${DNS_FILTER_CONFIG_FILE:-${WORK_DIR}/dnsmasq.conf}"
 LOG_DIR="${LOG_DIR:-${WORK_DIR}/logs}"
 INSTALL_LOG_FILE="${INSTALL_LOG_FILE:-${LOG_DIR}/install.log}"
 
@@ -37,6 +38,10 @@ LOG_LEVEL="${LOG_LEVEL:-debug}"
 DNS_SERVER="${DNS_SERVER:-77.88.8.8}"
 DNS_SERVER_PORT="${DNS_SERVER_PORT:-53}"
 DNS_STRATEGY="${DNS_STRATEGY:-ipv4_only}"
+DNS_FILTER_ENABLED="${DNS_FILTER_ENABLED:-1}"
+DNS_FILTER_LISTEN="${DNS_FILTER_LISTEN:-127.0.0.1}"
+DNS_FILTER_PORT="${DNS_FILTER_PORT:-5353}"
+DNS_FILTER_RR_TYPES="${DNS_FILTER_RR_TYPES:-HTTPS,SVCB}"
 DEBUG_SOCKS_LISTEN="${DEBUG_SOCKS_LISTEN:-127.0.0.1}"
 DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-1080}"
 INSTALL_ROUTING_PACKAGES="${INSTALL_ROUTING_PACKAGES:-1}"
@@ -103,6 +108,10 @@ Optional variables:
   DNS_SERVER                          Upstream DNS for sing-box (default: 77.88.8.8)
   DNS_SERVER_PORT                     DNS port (default: 53)
   DNS_STRATEGY                        DNS strategy (default: ipv4_only)
+  DNS_FILTER_ENABLED                  Set to 1 to run local dnsmasq and filter HTTPS/SVCB RR (default: 1)
+  DNS_FILTER_LISTEN                   Local dnsmasq listen address (default: 127.0.0.1)
+  DNS_FILTER_PORT                     Local dnsmasq listen port (default: 5353)
+  DNS_FILTER_RR_TYPES                 RR types filtered by local dnsmasq (default: HTTPS,SVCB)
   DEBUG_SOCKS_LISTEN                  Debug SOCKS listen address (default: 127.0.0.1)
   DEBUG_SOCKS_PORT                    Debug SOCKS port (default: 1080)
   REJECT_UDP_443                     Set to 1 to reject client UDP/443 and force TCP fallback (default: 0)
@@ -396,7 +405,7 @@ install_dependencies() {
 
   log "Installing sing-box dependencies"
   apt-get update
-  apt-get install -y ca-certificates curl iproute2 nftables
+  apt-get install -y ca-certificates curl dnsmasq-base iproute2 nftables
 
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc
@@ -424,6 +433,7 @@ render_config() {
   local obfs_block=""
   local debug_socks_inbound=""
   local route_final=""
+  local dns_resolver_tag="dns-direct"
 
   case "${ROUTE_FINAL}" in
     direct|hy2-out)
@@ -431,6 +441,17 @@ render_config() {
       ;;
     *)
       die "Unsupported ROUTE_FINAL: ${ROUTE_FINAL} (expected: direct or hy2-out)"
+      ;;
+  esac
+
+  case "${DNS_FILTER_ENABLED}" in
+    0)
+      ;;
+    1)
+      dns_resolver_tag="dns-local"
+      ;;
+    *)
+      die "Unsupported DNS_FILTER_ENABLED: ${DNS_FILTER_ENABLED} (expected: 0 or 1)"
       ;;
   esac
 
@@ -558,9 +579,18 @@ EOF
         "tag": "dns-direct",
         "server": $(json_quote "${DNS_SERVER}"),
         "server_port": ${DNS_SERVER_PORT}
+      }$(if [[ "${DNS_FILTER_ENABLED}" == "1" ]]; then cat <<EOF2
+,
+      {
+        "type": "udp",
+        "tag": "dns-local",
+        "server": $(json_quote "${DNS_FILTER_LISTEN}"),
+        "server_port": ${DNS_FILTER_PORT}
       }
+EOF2
+fi)
     ],
-    "final": "dns-direct",
+    "final": $(json_quote "${dns_resolver_tag}"),
     "strategy": $(json_quote "${DNS_STRATEGY}")
   },
   "inbounds": [
@@ -608,7 +638,7 @@ EOF
         "server_name": $(json_quote "${HYSTERIA_SNI}")
       },
       "domain_resolver": {
-        "server": "dns-direct",
+        "server": $(json_quote "${dns_resolver_tag}"),
         "strategy": $(json_quote "${DNS_STRATEGY}")
       }${obfs_block}
     }
@@ -616,7 +646,7 @@ EOF
   "route": {
     "auto_detect_interface": true,
     "default_domain_resolver": {
-      "server": "dns-direct",
+      "server": $(json_quote "${dns_resolver_tag}"),
       "strategy": $(json_quote "${DNS_STRATEGY}")
     },
     "rules": [
@@ -645,6 +675,27 @@ EOF
   chmod 0600 "${CONFIG_FILE}"
 }
 
+write_dns_filter_config() {
+  if [[ "${DNS_FILTER_ENABLED}" != "1" ]]; then
+    rm -f "${DNS_FILTER_CONFIG_FILE}"
+    return 0
+  fi
+
+  cat > "${DNS_FILTER_CONFIG_FILE}" <<EOF
+no-daemon
+bind-interfaces
+listen-address=${DNS_FILTER_LISTEN}
+port=${DNS_FILTER_PORT}
+no-resolv
+no-hosts
+cache-size=1000
+user=root
+server=${DNS_SERVER}#${DNS_SERVER_PORT}
+filter-rr=${DNS_FILTER_RR_TYPES}
+EOF
+  chmod 0600 "${DNS_FILTER_CONFIG_FILE}"
+}
+
 write_service_env() {
   cat > "${SERVICE_ENV_FILE}" <<EOF
 AWG_IFACE=$(printf '%q' "${AWG_IFACE}")
@@ -657,6 +708,10 @@ AUTO_REDIRECT_INPUT_MARK=$(printf '%q' "${AUTO_REDIRECT_INPUT_MARK}")
 AUTO_REDIRECT_OUTPUT_MARK=$(printf '%q' "${AUTO_REDIRECT_OUTPUT_MARK}")
 AUTO_REDIRECT_RESET_MARK=$(printf '%q' "${AUTO_REDIRECT_RESET_MARK}")
 AUTO_REDIRECT_FALLBACK_RULE_INDEX=$(printf '%q' "${AUTO_REDIRECT_FALLBACK_RULE_INDEX}")
+DNS_FILTER_ENABLED=$(printf '%q' "${DNS_FILTER_ENABLED}")
+DNS_FILTER_CONFIG_FILE=$(printf '%q' "${DNS_FILTER_CONFIG_FILE}")
+DNS_FILTER_LISTEN=$(printf '%q' "${DNS_FILTER_LISTEN}")
+DNS_FILTER_PORT=$(printf '%q' "${DNS_FILTER_PORT}")
 EOF
   chmod 0600 "${SERVICE_ENV_FILE}"
 }
@@ -681,6 +736,11 @@ AUTO_REDIRECT_FALLBACK_RULE_INDEX=$(printf '%q' "${AUTO_REDIRECT_FALLBACK_RULE_I
 HY2_URI=$(printf '%q' "${HY2_URI}")
 DEBUG_SOCKS_LISTEN=$(printf '%q' "${DEBUG_SOCKS_LISTEN}")
 DEBUG_SOCKS_PORT=$(printf '%q' "${DEBUG_SOCKS_PORT}")
+DNS_FILTER_ENABLED=$(printf '%q' "${DNS_FILTER_ENABLED}")
+DNS_FILTER_CONFIG_FILE=$(printf '%q' "${DNS_FILTER_CONFIG_FILE}")
+DNS_FILTER_LISTEN=$(printf '%q' "${DNS_FILTER_LISTEN}")
+DNS_FILTER_PORT=$(printf '%q' "${DNS_FILTER_PORT}")
+DNS_FILTER_RR_TYPES=$(printf '%q' "${DNS_FILTER_RR_TYPES}")
 INSTALL_LOG_FILE=$(printf '%q' "${INSTALL_LOG_FILE}")
 EOF
   chmod 0600 "${STATE_ENV_FILE}"
@@ -765,6 +825,7 @@ main() {
   detect_awg_iface
   merge_remote_domain_lists
   render_config
+  write_dns_filter_config
   write_service_env
   write_state_env
   install_entrypoint

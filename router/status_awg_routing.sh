@@ -14,6 +14,9 @@ AUTO_REDIRECT_OUTPUT_MARK="${AUTO_REDIRECT_OUTPUT_MARK:-0x2024}"
 AUTO_REDIRECT_RESET_MARK="${AUTO_REDIRECT_RESET_MARK:-0x2025}"
 AUTO_REDIRECT_FALLBACK_RULE_INDEX="${AUTO_REDIRECT_FALLBACK_RULE_INDEX:-32768}"
 DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-1080}"
+DNS_FILTER_ENABLED="${DNS_FILTER_ENABLED:-0}"
+DNS_FILTER_LISTEN="${DNS_FILTER_LISTEN:-127.0.0.1}"
+DNS_FILTER_PORT="${DNS_FILTER_PORT:-5353}"
 
 if [[ -f "${STATE_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -57,6 +60,9 @@ echo
 echo "== sockets =="
 ss -ltnup | grep -E "(:${DEBUG_SOCKS_PORT}|:443)" || true
 ss -uanp | grep ':443' || true
+if [[ "${DNS_FILTER_ENABLED}" == "1" ]]; then
+  ss -lunp | grep -E "${DNS_FILTER_LISTEN//./\\.}:${DNS_FILTER_PORT}" || true
+fi
 echo
 
 echo "== last logs =="
