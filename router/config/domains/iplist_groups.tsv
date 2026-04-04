@@ -1,13 +1,16 @@
-# local-service-name<TAB>iplist-group
-# If a service is absent here, update_blocked_domains.sh uses the same
-# value for both service name and iplist group.
+# local-service-name<TAB>source-type<TAB>source-value
+# source-type:
+#   group - use ?format=text&data=domains&group=<value>
+#   site  - use ?format=json&site=<value> and extract the "domains" list
+# If a service is absent here, update_blocked_domains.sh falls back to:
+#   <service>    group   <service>
 
-youtube	youtube
-instagram	instagram
-facebook	facebook
-openai	openai
-reddit	reddit
-whatsapp	whatsapp
-telegram	telegram
-x	x
-twitter	x
+youtube	group	youtube
+instagram	site	instagram.com
+facebook	group	facebook
+openai	group	openai
+reddit	group	reddit
+whatsapp	site	whatsapp.com
+telegram	site	telegram.org
+x	group	x
+twitter	group	x

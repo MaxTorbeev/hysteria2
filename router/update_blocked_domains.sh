@@ -79,28 +79,56 @@ fetch_url_lines() {
     "${url}" | tr -d '\r'
 }
 
-resolve_group() {
+resolve_source() {
   local service="$1"
-  local line key value
+  local key mode value
   if [[ -f "${IPLIST_GROUPS_FILE}" ]]; then
-    while IFS=$'\t' read -r key value; do
+    while IFS=$'\t' read -r key mode value; do
       key="$(trim "${key}")"
+      mode="$(trim "${mode}")"
       value="$(trim "${value}")"
       [[ -n "${key}" ]] || continue
       [[ "${key}" == \#* ]] && continue
       if [[ "${key}" == "${service}" ]]; then
-        printf '%s' "${value:-${service}}"
+        printf '%s\t%s' "${mode:-group}" "${value:-${service}}"
         return 0
       fi
     done < "${IPLIST_GROUPS_FILE}"
   fi
-  printf '%s' "${service}"
+  printf 'group\t%s' "${service}"
+}
+
+extract_site_domains() {
+  python3 - <<'PY'
+import json
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+if not isinstance(payload, dict):
+    sys.exit(0)
+
+for value in payload.values():
+    if not isinstance(value, dict):
+        continue
+    domains = value.get("domains", [])
+    if isinstance(domains, list):
+        for domain in domains:
+            if isinstance(domain, str):
+                domain = domain.strip()
+                if domain:
+                    print(domain)
+    break
+PY
 }
 
 main() {
-  local line service group
+  local line service source_mode source_value
   local exact_tmp suffix_tmp state_tmp
-  local exact_url suffix_url exact_lines suffix_lines
+  local exact_url suffix_url site_url exact_lines suffix_lines site_json
   local changed=0
 
   load_state_env
@@ -119,39 +147,65 @@ main() {
     [[ -n "${service}" ]] || continue
     [[ "${service}" == \#* ]] && continue
 
-    group="$(resolve_group "${service}")"
-    [[ -n "${group}" ]] || die "Could not resolve iplist group for service: ${service}"
+    IFS=$'\t' read -r source_mode source_value <<< "$(resolve_source "${service}")"
+    [[ -n "${source_mode}" ]] || die "Could not resolve source mode for service: ${service}"
+    [[ -n "${source_value}" ]] || die "Could not resolve source value for service: ${service}"
 
-    exact_url="${IPLIST_BASE_URL}?format=text&data=domains&group=${group}"
-    suffix_url="${IPLIST_BASE_URL}?format=text&data=domains&group=${group}&wildcard=1"
+    case "${source_mode}" in
+      group)
+        exact_url="${IPLIST_BASE_URL}?format=text&data=domains&group=${source_value}"
+        suffix_url="${IPLIST_BASE_URL}?format=text&data=domains&group=${source_value}&wildcard=1"
 
-    log "Fetching exact domains for ${service} (group=${group})"
-    if exact_lines="$(fetch_url_lines "${exact_url}")"; then
-      printf '%s\n' "${exact_lines}" | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if (length($0)) print $0}' >> "${exact_tmp}"
-    elif [[ "${IPLIST_STRICT}" == "1" ]]; then
-      die "Failed to fetch exact domains for service ${service} (group=${group})"
-    else
-      warn "Failed to fetch exact domains for ${service}, continuing"
-    fi
+        log "Fetching exact domains for ${service} (group=${source_value})"
+        if exact_lines="$(fetch_url_lines "${exact_url}")"; then
+          printf '%s\n' "${exact_lines}" | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if (length($0)) print $0}' >> "${exact_tmp}"
+        elif [[ "${IPLIST_STRICT}" == "1" ]]; then
+          die "Failed to fetch exact domains for service ${service} (group=${source_value})"
+        else
+          warn "Failed to fetch exact domains for ${service}, continuing"
+        fi
 
-    log "Fetching wildcard domains for ${service} (group=${group})"
-    if suffix_lines="$(fetch_url_lines "${suffix_url}")"; then
-      while IFS= read -r line; do
-        line="$(trim "${line}")"
-        [[ -n "${line}" ]] || continue
-        case "${line}" in
-          \*.*) line="${line#*.}" ;;
-          .*) line="${line#.}" ;;
-        esac
-        printf '%s\n' "${line}" >> "${suffix_tmp}"
-      done <<< "${suffix_lines}"
-    elif [[ "${IPLIST_STRICT}" == "1" ]]; then
-      die "Failed to fetch wildcard domains for service ${service} (group=${group})"
-    else
-      warn "Failed to fetch wildcard domains for ${service}, continuing"
-    fi
+        log "Fetching wildcard domains for ${service} (group=${source_value})"
+        if suffix_lines="$(fetch_url_lines "${suffix_url}")"; then
+          while IFS= read -r line; do
+            line="$(trim "${line}")"
+            [[ -n "${line}" ]] || continue
+            case "${line}" in
+              \*.*) line="${line#*.}" ;;
+              .*) line="${line#.}" ;;
+            esac
+            printf '%s\n' "${line}" >> "${suffix_tmp}"
+          done <<< "${suffix_lines}"
+        elif [[ "${IPLIST_STRICT}" == "1" ]]; then
+          die "Failed to fetch wildcard domains for service ${service} (group=${source_value})"
+        else
+          warn "Failed to fetch wildcard domains for ${service}, continuing"
+        fi
+        ;;
+      site)
+        site_url="${IPLIST_BASE_URL}?format=json&site=${source_value}"
 
-    printf '%s\t%s\n' "${service}" "${group}" >> "${state_tmp}"
+        log "Fetching exact domains for ${service} (site=${source_value})"
+        if site_json="$(fetch_url_lines "${site_url}")"; then
+          if ! printf '%s\n' "${site_json}" | extract_site_domains | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if (length($0)) print $0}' >> "${exact_tmp}"; then
+            if [[ "${IPLIST_STRICT}" == "1" ]]; then
+              die "Failed to parse exact domains for service ${service} (site=${source_value})"
+            else
+              warn "Failed to parse exact domains for ${service}, continuing"
+            fi
+          fi
+        elif [[ "${IPLIST_STRICT}" == "1" ]]; then
+          die "Failed to fetch exact domains for service ${service} (site=${source_value})"
+        else
+          warn "Failed to fetch exact domains for ${service}, continuing"
+        fi
+        ;;
+      *)
+        die "Unsupported source mode ${source_mode} for service ${service}"
+        ;;
+    esac
+
+    printf '%s\t%s\t%s\n' "${service}" "${source_mode}" "${source_value}" >> "${state_tmp}"
   done < "${BLOCKED_SERVICES_FILE}"
 
   sort -u "${exact_tmp}" -o "${exact_tmp}"
