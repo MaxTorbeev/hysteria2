@@ -434,10 +434,6 @@ render_config() {
             "port": 853
           },
           {
-            "network": "udp",
-            "port": 443
-          },
-          {
             "protocol": "stun"
           }
         ],
