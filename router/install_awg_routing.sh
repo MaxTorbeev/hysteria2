@@ -23,15 +23,21 @@ SYSTEMD_UNIT_FILE=""
 AWG_IFACE="${AWG_IFACE:-}"
 DEFAULT_AWG_IFACE="${DEFAULT_AWG_IFACE:-awg0}"
 
-TPROXY_PORT="${TPROXY_PORT:-60080}"
-ROUTER_TABLE="${ROUTER_TABLE:-100}"
-ROUTER_MARK="${ROUTER_MARK:-0x1}"
-NFT_TABLE="${NFT_TABLE:-hp2router}"
+TUN_IFACE="${TUN_IFACE:-sbhp2}"
+TUN_ADDRESS="${TUN_ADDRESS:-172.19.0.1/30}"
+TUN_MTU="${TUN_MTU:-1400}"
+IPROUTE2_TABLE_INDEX="${IPROUTE2_TABLE_INDEX:-2022}"
+IPROUTE2_RULE_INDEX="${IPROUTE2_RULE_INDEX:-9000}"
+AUTO_REDIRECT_INPUT_MARK="${AUTO_REDIRECT_INPUT_MARK:-0x2023}"
+AUTO_REDIRECT_OUTPUT_MARK="${AUTO_REDIRECT_OUTPUT_MARK:-0x2024}"
+AUTO_REDIRECT_RESET_MARK="${AUTO_REDIRECT_RESET_MARK:-0x2025}"
+AUTO_REDIRECT_FALLBACK_RULE_INDEX="${AUTO_REDIRECT_FALLBACK_RULE_INDEX:-32768}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-30}"
 LOG_LEVEL="${LOG_LEVEL:-debug}"
 DNS_SERVER="${DNS_SERVER:-77.88.8.8}"
 DNS_SERVER_PORT="${DNS_SERVER_PORT:-53}"
 DNS_STRATEGY="${DNS_STRATEGY:-ipv4_only}"
+DEBUG_SOCKS_LISTEN="${DEBUG_SOCKS_LISTEN:-127.0.0.1}"
 DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-1080}"
 INSTALL_ROUTING_PACKAGES="${INSTALL_ROUTING_PACKAGES:-1}"
 
@@ -69,19 +75,29 @@ Usage:
   sudo HY2_URI='hy2://password@host:443/?sni=host&obfs=salamander&obfs-password=secret' bash install_awg_routing.sh
 
 Optional variables:
-  HY2_URI                  Hysteria2 URI. Optional if present in env file.
-  INPUT_ENV_FILE           Env file to source before applying defaults.
-  SERVICE_NAME             systemd service name (default: hp2-routing)
-  AWG_IFACE                Host AWG/WG interface. Auto-detected if empty.
-  DEFAULT_AWG_IFACE        Fallback interface name if auto-detect fails (default: awg0)
-  INSTALL_ROUTING_PACKAGES Set to 1 to install sing-box and nftables.
-  DNS_SERVER               Upstream DNS for sing-box (default: 77.88.8.8)
-  DNS_SERVER_PORT          DNS port (default: 53)
-  DNS_STRATEGY             DNS strategy (default: prefer_ipv4)
-  DEBUG_SOCKS_PORT         Optional SOCKS debug listener (default: 1080)
-  DIRECT_SUFFIXES          Direct-routed suffixes (default: ru,xn--p1ai)
-  EXTRA_DIRECT_DOMAINS     Extra direct exact domains.
-  EXTRA_DIRECT_SUFFIXES    Extra direct suffixes.
+  HY2_URI                             Hysteria2 URI. Optional if present in env file.
+  INPUT_ENV_FILE                      Env file to source before applying defaults.
+  SERVICE_NAME                        systemd service name (default: hp2-routing)
+  AWG_IFACE                           Host AWG/WG interface. Auto-detected if empty.
+  DEFAULT_AWG_IFACE                   Fallback interface name if auto-detect fails (default: awg0)
+  INSTALL_ROUTING_PACKAGES            Set to 1 to install sing-box and nftables.
+  TUN_IFACE                           sing-box tun interface name (default: sbhp2)
+  TUN_ADDRESS                         sing-box tun IPv4 address (default: 172.19.0.1/30)
+  TUN_MTU                             sing-box tun MTU (default: 1400)
+  IPROUTE2_TABLE_INDEX                sing-box auto-route table index (default: 2022)
+  IPROUTE2_RULE_INDEX                 sing-box auto-route rule index (default: 9000)
+  AUTO_REDIRECT_INPUT_MARK            sing-box auto-redirect input mark (default: 0x2023)
+  AUTO_REDIRECT_OUTPUT_MARK           sing-box auto-redirect output mark (default: 0x2024)
+  AUTO_REDIRECT_RESET_MARK            sing-box auto-redirect reset mark (default: 0x2025)
+  AUTO_REDIRECT_FALLBACK_RULE_INDEX   sing-box fallback rule index (default: 32768)
+  DNS_SERVER                          Upstream DNS for sing-box (default: 77.88.8.8)
+  DNS_SERVER_PORT                     DNS port (default: 53)
+  DNS_STRATEGY                        DNS strategy (default: ipv4_only)
+  DEBUG_SOCKS_LISTEN                  Debug SOCKS listen address (default: 127.0.0.1)
+  DEBUG_SOCKS_PORT                    Debug SOCKS port (default: 1080)
+  DIRECT_SUFFIXES                     Direct-routed suffixes (default: ru,xn--p1ai)
+  EXTRA_DIRECT_DOMAINS                Extra direct exact domains.
+  EXTRA_DIRECT_SUFFIXES               Extra direct suffixes.
 EOF
 }
 
@@ -319,6 +335,7 @@ render_config() {
   if ! is_ip_literal "${HYSTERIA_SERVER}"; then
     direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SERVER}")"
   fi
+  direct_domains="$(add_csv_item "${direct_domains}" "${EXTRA_DIRECT_DOMAINS}")"
 
   reject_rule=$(cat <<'EOF'
       {
@@ -340,7 +357,6 @@ render_config() {
       },
 EOF
 )
-  direct_domains="$(add_csv_item "${direct_domains}" "${EXTRA_DIRECT_DOMAINS}")"
 
   if [[ -n "${direct_domains//,/}" ]]; then
     domain_rule=$(cat <<EOF
@@ -387,7 +403,7 @@ EOF
     {
       "type": "socks",
       "tag": "debug-socks",
-      "listen": "0.0.0.0",
+      "listen": $(json_quote "${DEBUG_SOCKS_LISTEN}"),
       "listen_port": ${DEBUG_SOCKS_PORT}
     }
 EOF
@@ -414,10 +430,27 @@ EOF
   },
   "inbounds": [
     {
-      "type": "tproxy",
-      "tag": "tproxy-in",
-      "listen": "0.0.0.0",
-      "listen_port": ${TPROXY_PORT}
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": $(json_quote "${TUN_IFACE}"),
+      "address": [
+        $(json_quote "${TUN_ADDRESS}")
+      ],
+      "mtu": ${TUN_MTU},
+      "auto_route": true,
+      "iproute2_table_index": ${IPROUTE2_TABLE_INDEX},
+      "iproute2_rule_index": ${IPROUTE2_RULE_INDEX},
+      "auto_redirect": true,
+      "auto_redirect_input_mark": $(json_quote "${AUTO_REDIRECT_INPUT_MARK}"),
+      "auto_redirect_output_mark": $(json_quote "${AUTO_REDIRECT_OUTPUT_MARK}"),
+      "auto_redirect_reset_mark": $(json_quote "${AUTO_REDIRECT_RESET_MARK}"),
+      "auto_redirect_iproute2_fallback_rule_index": ${AUTO_REDIRECT_FALLBACK_RULE_INDEX},
+      "strict_route": true,
+      "exclude_mptcp": true,
+      "stack": "system",
+      "include_interface": [
+        $(json_quote "${AWG_IFACE}")
+      ]
     }${debug_socks_inbound}
   ],
   "outbounds": [
@@ -480,12 +513,15 @@ EOF
 write_service_env() {
   cat > "${SERVICE_ENV_FILE}" <<EOF
 AWG_IFACE=$(printf '%q' "${AWG_IFACE}")
+TUN_IFACE=$(printf '%q' "${TUN_IFACE}")
 CONFIG_FILE=$(printf '%q' "${CONFIG_FILE}")
-TPROXY_PORT=$(printf '%q' "${TPROXY_PORT}")
-ROUTER_TABLE=$(printf '%q' "${ROUTER_TABLE}")
-ROUTER_MARK=$(printf '%q' "${ROUTER_MARK}")
-NFT_TABLE=$(printf '%q' "${NFT_TABLE}")
 WAIT_TIMEOUT=$(printf '%q' "${WAIT_TIMEOUT}")
+IPROUTE2_TABLE_INDEX=$(printf '%q' "${IPROUTE2_TABLE_INDEX}")
+IPROUTE2_RULE_INDEX=$(printf '%q' "${IPROUTE2_RULE_INDEX}")
+AUTO_REDIRECT_INPUT_MARK=$(printf '%q' "${AUTO_REDIRECT_INPUT_MARK}")
+AUTO_REDIRECT_OUTPUT_MARK=$(printf '%q' "${AUTO_REDIRECT_OUTPUT_MARK}")
+AUTO_REDIRECT_RESET_MARK=$(printf '%q' "${AUTO_REDIRECT_RESET_MARK}")
+AUTO_REDIRECT_FALLBACK_RULE_INDEX=$(printf '%q' "${AUTO_REDIRECT_FALLBACK_RULE_INDEX}")
 EOF
   chmod 0600 "${SERVICE_ENV_FILE}"
 }
@@ -498,11 +534,17 @@ CONFIG_FILE=$(printf '%q' "${CONFIG_FILE}")
 SERVICE_NAME=$(printf '%q' "${SERVICE_NAME}")
 UNIT_NAME=$(printf '%q' "${UNIT_NAME}")
 AWG_IFACE=$(printf '%q' "${AWG_IFACE}")
-TPROXY_PORT=$(printf '%q' "${TPROXY_PORT}")
-ROUTER_TABLE=$(printf '%q' "${ROUTER_TABLE}")
-ROUTER_MARK=$(printf '%q' "${ROUTER_MARK}")
-NFT_TABLE=$(printf '%q' "${NFT_TABLE}")
+TUN_IFACE=$(printf '%q' "${TUN_IFACE}")
+TUN_ADDRESS=$(printf '%q' "${TUN_ADDRESS}")
+TUN_MTU=$(printf '%q' "${TUN_MTU}")
+IPROUTE2_TABLE_INDEX=$(printf '%q' "${IPROUTE2_TABLE_INDEX}")
+IPROUTE2_RULE_INDEX=$(printf '%q' "${IPROUTE2_RULE_INDEX}")
+AUTO_REDIRECT_INPUT_MARK=$(printf '%q' "${AUTO_REDIRECT_INPUT_MARK}")
+AUTO_REDIRECT_OUTPUT_MARK=$(printf '%q' "${AUTO_REDIRECT_OUTPUT_MARK}")
+AUTO_REDIRECT_RESET_MARK=$(printf '%q' "${AUTO_REDIRECT_RESET_MARK}")
+AUTO_REDIRECT_FALLBACK_RULE_INDEX=$(printf '%q' "${AUTO_REDIRECT_FALLBACK_RULE_INDEX}")
 HY2_URI=$(printf '%q' "${HY2_URI}")
+DEBUG_SOCKS_LISTEN=$(printf '%q' "${DEBUG_SOCKS_LISTEN}")
 DEBUG_SOCKS_PORT=$(printf '%q' "${DEBUG_SOCKS_PORT}")
 INSTALL_LOG_FILE=$(printf '%q' "${INSTALL_LOG_FILE}")
 EOF
@@ -516,7 +558,7 @@ install_entrypoint() {
 install_unit() {
   cat > "${SYSTEMD_UNIT_FILE}" <<EOF
 [Unit]
-Description=HP2 AWG routing via sing-box and Hysteria2
+Description=HP2 AWG routing via sing-box tun and Hysteria2
 After=network-online.target awg-quick@${AWG_IFACE}.service
 Wants=network-online.target
 
@@ -554,8 +596,11 @@ AWG routing installed.
 Service:
   ${UNIT_NAME}
 
-Interface:
+AWG interface:
   ${AWG_IFACE}
+
+sing-box tun interface:
+  ${TUN_IFACE}
 
 Config:
   ${CONFIG_FILE}
@@ -566,7 +611,7 @@ Install log:
 Useful commands:
   bash ${SCRIPT_DIR}/status_awg_routing.sh
   journalctl -u ${UNIT_NAME} -f
-  curl --proxy socks5h://127.0.0.1:${DEBUG_SOCKS_PORT} https://api.ipify.org --max-time 15
+  curl --proxy socks5h://${DEBUG_SOCKS_LISTEN}:${DEBUG_SOCKS_PORT} https://api.ipify.org --max-time 15
 EOF
 }
 

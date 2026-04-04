@@ -7,7 +7,7 @@
 
 - `AmneziaWG` на сервере;
 - веб-панель через `amneziawg-web.sh install`.
-- отдельный host-level routing layer через `sing-box + TPROXY + Hysteria2`.
+- отдельный host-level routing layer через `sing-box tun + auto_route/auto_redirect + Hysteria2`.
 
 ## Что входит
 
@@ -15,7 +15,7 @@
 - `status_awg_stack.sh` - быстрый статус для `AmneziaWG` и панели
 - `install_awg_routing.sh` - companion installer для маршрутизации `.ru` напрямую и остального трафика через `Hysteria2`
 - `status_awg_routing.sh` - быстрый статус routing-сервиса
-- `awg-routing-entrypoint.sh` - runtime-логика для `TPROXY`, `nftables`, `ip rule` и `sing-box`
+- `awg-routing-entrypoint.sh` - runtime-логика для host-level `sing-box`, sysctl и runtime-диагностики
 - `.env.example` - шаблон переменных для неинтерактивного запуска
 
 ## Что делает installer
@@ -112,7 +112,8 @@ Installer:
 - ставит `sing-box` и `nftables`, если это включено;
 - генерирует host-level `sing-box` config;
 - создаёт systemd unit `hp2-routing.service`;
-- настраивает `TPROXY` и policy routing только для трафика, который приходит через `AWG_IFACE`;
+- поднимает `sing-box` `tun`-inbound с `auto_route`, `auto_redirect` и `include_interface = AWG_IFACE`;
+- использует штатные `ip rule`/`nftables` правила `sing-box`, а не самописный `TPROXY`;
 - по умолчанию форсирует `ipv4_only` для DNS внутри `sing-box`;
 - отбрасывает `UDP/443`, `853` и `STUN`, чтобы браузеры и приложения не зависали на `QUIC/DoQ` в transparent-режиме;
 - отправляет `.ru` и `.рф` напрямую;
@@ -137,13 +138,8 @@ journalctl -u hp2-routing.service -f
 curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 ```
 
-## Что удалено
+## Замечания
 
-Старый стек, связанный с:
-
-- `TPROXY`
-- `sing-box`
-- host-level router scripts
-- docker migration helper
-
-удалён из этого каталога и больше не поддерживается этим bootstrap-пакетом.
+- Текущий routing-layer рассчитан на клиентские профили с `AllowedIPs = 0.0.0.0/0`.
+- Для этой схемы лучше использовать `DNS = 10.66.66.1` в клиентском профиле, чтобы DNS тоже уходил в transparent path.
+- Debug SOCKS по умолчанию слушает `127.0.0.1:1080` и полезен для изолированной проверки `hy2-out`.
