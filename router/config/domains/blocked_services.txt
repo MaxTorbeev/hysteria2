@@ -5,3 +5,4 @@ youtube
 instagram
 whatsapp
 telegram
+chatgpt
