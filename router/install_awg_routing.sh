@@ -46,6 +46,10 @@ VPN_DOMAINS="${VPN_DOMAINS:-youtubei.googleapis.com}"
 VPN_SUFFIXES="${VPN_SUFFIXES:-youtube.com,youtu.be,googlevideo.com,ytimg.com}"
 IPLIST_DOMAINS_URL="${IPLIST_DOMAINS_URL:-https://iplist.opencck.org/?format=text&data=domains&group=youtube}"
 IPLIST_WILDCARD_DOMAINS_URL="${IPLIST_WILDCARD_DOMAINS_URL:-https://iplist.opencck.org/?format=text&data=domains&group=youtube&wildcard=1}"
+IPLIST_CONNECT_TIMEOUT="${IPLIST_CONNECT_TIMEOUT:-5}"
+IPLIST_FETCH_TIMEOUT="${IPLIST_FETCH_TIMEOUT:-20}"
+IPLIST_RETRIES="${IPLIST_RETRIES:-2}"
+IPLIST_STRICT="${IPLIST_STRICT:-0}"
 EXTRA_DIRECT_DOMAINS="${EXTRA_DIRECT_DOMAINS:-}"
 EXTRA_DIRECT_SUFFIXES="${EXTRA_DIRECT_SUFFIXES:-}"
 SAVE_STATE_ENV="${SAVE_STATE_ENV:-1}"
@@ -103,6 +107,10 @@ Optional variables:
   VPN_SUFFIXES                        Domain suffixes routed via Hysteria2.
   IPLIST_DOMAINS_URL                  Optional iplist URL with exact domains to merge into VPN_DOMAINS.
   IPLIST_WILDCARD_DOMAINS_URL         Optional iplist URL with wildcard domains to merge into VPN_SUFFIXES.
+  IPLIST_CONNECT_TIMEOUT              curl --connect-timeout for iplist fetches (default: 5)
+  IPLIST_FETCH_TIMEOUT                curl --max-time for iplist fetches (default: 20)
+  IPLIST_RETRIES                      curl retry count for iplist fetches (default: 2)
+  IPLIST_STRICT                       Set to 1 to fail install if iplist fetch fails (default: 0)
   DIRECT_SUFFIXES                     Direct-routed suffixes (default: ru,xn--p1ai)
   EXTRA_DIRECT_DOMAINS                Extra direct exact domains.
   EXTRA_DIRECT_SUFFIXES               Extra direct suffixes.
@@ -322,7 +330,16 @@ detect_awg_iface() {
 fetch_url_lines() {
   local url="$1"
   [[ -n "${url}" ]] || return 0
-  curl -fsSL "${url}" | tr -d '\r'
+  curl \
+    --fail \
+    --silent \
+    --show-error \
+    --location \
+    --connect-timeout "${IPLIST_CONNECT_TIMEOUT}" \
+    --max-time "${IPLIST_FETCH_TIMEOUT}" \
+    --retry "${IPLIST_RETRIES}" \
+    --retry-delay 1 \
+    "${url}" | tr -d '\r'
 }
 
 merge_remote_domain_lists() {
@@ -330,20 +347,30 @@ merge_remote_domain_lists() {
 
   if [[ -n "${IPLIST_DOMAINS_URL}" ]]; then
     log "Fetching exact domains from ${IPLIST_DOMAINS_URL}"
-    exact_lines="$(fetch_url_lines "${IPLIST_DOMAINS_URL}")"
-    VPN_DOMAINS="$(append_lines_to_csv "${VPN_DOMAINS}" "${exact_lines}")"
+    if exact_lines="$(fetch_url_lines "${IPLIST_DOMAINS_URL}")"; then
+      VPN_DOMAINS="$(append_lines_to_csv "${VPN_DOMAINS}" "${exact_lines}")"
+    elif [[ "${IPLIST_STRICT}" == "1" ]]; then
+      die "Failed to fetch exact domains from iplist"
+    else
+      warn "Failed to fetch exact domains from iplist, continuing with built-in VPN_DOMAINS"
+    fi
   fi
 
   if [[ -n "${IPLIST_WILDCARD_DOMAINS_URL}" ]]; then
     log "Fetching wildcard domains from ${IPLIST_WILDCARD_DOMAINS_URL}"
-    wildcard_lines="$(fetch_url_lines "${IPLIST_WILDCARD_DOMAINS_URL}")"
-    while IFS= read -r line; do
-      line="$(trim "${line}")"
-      [[ -n "${line}" ]] || continue
-      line="${line#*.}"
-      wildcard_suffixes="$(add_csv_item "${wildcard_suffixes}" "${line}")"
-    done <<< "${wildcard_lines}"
-    VPN_SUFFIXES="$(add_csv_item "${VPN_SUFFIXES}" "${wildcard_suffixes}")"
+    if wildcard_lines="$(fetch_url_lines "${IPLIST_WILDCARD_DOMAINS_URL}")"; then
+      while IFS= read -r line; do
+        line="$(trim "${line}")"
+        [[ -n "${line}" ]] || continue
+        line="${line#*.}"
+        wildcard_suffixes="$(add_csv_item "${wildcard_suffixes}" "${line}")"
+      done <<< "${wildcard_lines}"
+      VPN_SUFFIXES="$(add_csv_item "${VPN_SUFFIXES}" "${wildcard_suffixes}")"
+    elif [[ "${IPLIST_STRICT}" == "1" ]]; then
+      die "Failed to fetch wildcard domains from iplist"
+    else
+      warn "Failed to fetch wildcard domains from iplist, continuing with built-in VPN_SUFFIXES"
+    fi
   fi
 }
 
