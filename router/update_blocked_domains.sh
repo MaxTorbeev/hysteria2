@@ -99,7 +99,7 @@ resolve_source() {
 }
 
 extract_site_domains() {
-  python3 - <<'PY'
+  python3 -c '
 import json
 import sys
 
@@ -122,7 +122,7 @@ for value in payload.values():
                 if domain:
                     print(domain)
     break
-PY
+'
 }
 
 main() {
