@@ -16,7 +16,7 @@ WIRESOCK_REF="${WIRESOCK_REF:-main}"
 
 INSTALL_DEPENDENCIES="${INSTALL_DEPENDENCIES:-1}"
 INSTALL_WEB_PANEL="${INSTALL_WEB_PANEL:-1}"
-INSTALL_WEB_RUST="${INSTALL_WEB_RUST:-0}"
+INSTALL_WEB_RUST="${INSTALL_WEB_RUST:-1}"
 SAVE_STATE_ENV="${SAVE_STATE_ENV:-1}"
 
 AUTO_INSTALL="${AUTO_INSTALL:-y}"
@@ -65,7 +65,7 @@ Optional variables:
   WIRESOCK_REF            Branch or tag to checkout.
   INSTALL_DEPENDENCIES    Set to 1 to install git/curl/ca-certificates.
   INSTALL_WEB_PANEL       Set to 0 to skip the panel.
-  INSTALL_WEB_RUST        Set to 1 to pass --install-rust to amneziawg-web.sh.
+  INSTALL_WEB_RUST        Set to 1 to install Rust/cargo automatically for the panel.
   SAVE_STATE_ENV          Set to 1 to persist effective variables.
 
   AUTO_INSTALL            Passed to amneziawg-install.sh (default: y).
@@ -142,7 +142,24 @@ install_dependencies() {
   require_cmd apt-get
   log "Installing bootstrap dependencies"
   apt-get update
-  apt-get install -y ca-certificates curl git
+  apt-get install -y ca-certificates curl git build-essential pkg-config libssl-dev
+}
+
+install_rust_toolchain() {
+  [[ "${INSTALL_WEB_PANEL}" == "1" ]] || return 0
+  [[ "${INSTALL_WEB_RUST}" == "1" ]] || return 0
+
+  if command -v cargo >/dev/null 2>&1; then
+    log "Rust toolchain already installed"
+    return 0
+  fi
+
+  require_cmd curl
+  log "Installing Rust toolchain via rustup"
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+  export PATH="${HOME}/.cargo/bin:${PATH}"
+  command -v cargo >/dev/null 2>&1 || die "cargo is still not available after rustup install"
 }
 
 checkout_repo() {
@@ -202,7 +219,6 @@ run_web_install() {
 
   log "Running amneziawg-web.sh install"
   web_args=(install)
-  [[ "${INSTALL_WEB_RUST}" == "1" ]] && web_args+=(--install-rust)
 
   (
     cd "${WIRESOCK_REPO_DIR}"
@@ -275,6 +291,7 @@ main() {
   load_env_file
   setup_logging
   install_dependencies
+  install_rust_toolchain
   require_cmd git
   checkout_repo
   run_awg_install

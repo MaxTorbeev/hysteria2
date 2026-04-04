@@ -19,11 +19,12 @@
 `install_awg_stack.sh`:
 
 1. ставит bootstrap-зависимости (`git`, `curl`, `ca-certificates`), если это включено;
-2. клонирует или обновляет `wiresock/amneziawg-install`;
-3. запускает `amneziawg-install.sh`;
-4. поднимает веб-панель через `amneziawg-web.sh install`;
-5. пишет лог установки в `/opt/hp2-awg-stack/logs/install.log`;
-6. сохраняет state-файл в `/opt/hp2-awg-stack/stack.env`.
+2. ставит зависимости для сборки панели (`build-essential`, `pkg-config`, `libssl-dev`) и `Rust/cargo`, если панель включена;
+3. клонирует или обновляет `wiresock/amneziawg-install`;
+4. запускает `amneziawg-install.sh`;
+5. поднимает веб-панель через `amneziawg-web.sh install`;
+6. пишет лог установки в `/opt/hp2-awg-stack/logs/install.log`;
+7. сохраняет state-файл в `/opt/hp2-awg-stack/stack.env`.
 
 ## Быстрый старт
 
@@ -60,7 +61,7 @@ sudo bash install_awg_stack.sh --env-file /root/hp2-awg-stack.env
 - `WIRESOCK_REF` - ветка или tag репозитория
 - `INSTALL_DEPENDENCIES=1` - ставить bootstrap-зависимости через apt
 - `INSTALL_WEB_PANEL=1` - ставить панель
-- `INSTALL_WEB_RUST=1` - передать `--install-rust` для панели
+- `INSTALL_WEB_RUST=1` - автоматически ставить `rustup/cargo` для панели
 - `AUTO_INSTALL=y` - запускать `amneziawg-install.sh` в неинтерактивном режиме
 - `SERVER_PUB_IP` - публичный IP сервера
 - `SERVER_PUB_NIC` - внешний интерфейс сервера
