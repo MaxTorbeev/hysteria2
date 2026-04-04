@@ -180,7 +180,7 @@ run_awg_install() {
 
   (
     cd "${WIRESOCK_REPO_DIR}"
-    "${env_cmd[@]}" ./amneziawg-install.sh
+    "${env_cmd[@]}" bash ./amneziawg-install.sh
   )
 }
 
@@ -198,7 +198,7 @@ run_web_install() {
     env \
       "AWG_WEB_LISTEN=${AWG_WEB_LISTEN}" \
       "AWG_WEB_PUBLIC_BASE_URL=${AWG_WEB_PUBLIC_BASE_URL}" \
-      ./amneziawg-web.sh "${web_args[@]}"
+      bash ./amneziawg-web.sh "${web_args[@]}"
   )
 }
 

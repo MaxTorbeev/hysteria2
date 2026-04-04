@@ -25,7 +25,7 @@ echo "== panel status =="
 if [[ -x "${WIRESOCK_REPO_DIR}/amneziawg-web.sh" ]]; then
   (
     cd "${WIRESOCK_REPO_DIR}"
-    ./amneziawg-web.sh status
+    bash ./amneziawg-web.sh status
   ) || true
 else
   echo "Missing: ${WIRESOCK_REPO_DIR}/amneziawg-web.sh"
