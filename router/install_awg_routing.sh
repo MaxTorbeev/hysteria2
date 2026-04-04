@@ -226,13 +226,15 @@ add_csv_item() {
 append_lines_to_csv() {
   local current="$1"
   local input="$2"
-  local line
-  while IFS= read -r line; do
-    line="$(trim "$line")"
-    [[ -n "${line}" ]] || continue
-    current="$(add_csv_item "${current}" "${line}")"
-  done <<< "${input}"
-  printf '%s' "${current}"
+  local cleaned
+  cleaned="$(printf '%s\n' "${input}" | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if (length($0)) print $0}' | paste -sd, -)"
+  if [[ -z "${cleaned}" ]]; then
+    printf '%s' "${current}"
+  elif [[ -z "${current}" ]]; then
+    printf '%s' "${cleaned}"
+  else
+    printf '%s,%s' "${current}" "${cleaned}"
+  fi
 }
 
 url_decode() {
@@ -343,11 +345,13 @@ fetch_url_lines() {
 }
 
 merge_remote_domain_lists() {
-  local exact_lines wildcard_lines wildcard_suffixes=""
+  local exact_lines wildcard_lines wildcard_suffixes="" exact_count wildcard_count
 
   if [[ -n "${IPLIST_DOMAINS_URL}" ]]; then
     log "Fetching exact domains from ${IPLIST_DOMAINS_URL}"
     if exact_lines="$(fetch_url_lines "${IPLIST_DOMAINS_URL}")"; then
+      exact_count="$(printf '%s\n' "${exact_lines}" | awk 'NF {count++} END {print count+0}')"
+      log "Fetched ${exact_count} exact domains"
       VPN_DOMAINS="$(append_lines_to_csv "${VPN_DOMAINS}" "${exact_lines}")"
     elif [[ "${IPLIST_STRICT}" == "1" ]]; then
       die "Failed to fetch exact domains from iplist"
@@ -359,6 +363,8 @@ merge_remote_domain_lists() {
   if [[ -n "${IPLIST_WILDCARD_DOMAINS_URL}" ]]; then
     log "Fetching wildcard domains from ${IPLIST_WILDCARD_DOMAINS_URL}"
     if wildcard_lines="$(fetch_url_lines "${IPLIST_WILDCARD_DOMAINS_URL}")"; then
+      wildcard_count="$(printf '%s\n' "${wildcard_lines}" | awk 'NF {count++} END {print count+0}')"
+      log "Fetched ${wildcard_count} wildcard domains"
       while IFS= read -r line; do
         line="$(trim "${line}")"
         [[ -n "${line}" ]] || continue
