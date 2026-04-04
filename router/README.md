@@ -149,6 +149,13 @@ curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 - Чтобы поменять policy, используйте `ROUTE_FINAL`, `VPN_DOMAINS`, `VPN_SUFFIXES`, `IPLIST_DOMAINS_URL`, `IPLIST_WILDCARD_DOMAINS_URL`, `DIRECT_SUFFIXES`, `EXTRA_DIRECT_DOMAINS`, `EXTRA_DIRECT_SUFFIXES` в `.env`.
 - Чтобы отключить `iplist`, задайте `IPLIST_DOMAINS_URL=''` и `IPLIST_WILDCARD_DOMAINS_URL=''`.
 - Чтобы падать при недоступности `iplist`, задайте `IPLIST_STRICT='1'`.
+- Если клиентский веб-трафик уходит в `QUIC` и не открывает страницы, можно принудительно включить TCP fallback:
+
+```bash
+REJECT_UDP_443='1'
+```
+
+Это режет клиентский `UDP/443` на routing-layer и заставляет браузеры/приложения откатываться на `TCP/443`.
 - Для полного туннеля через `Hysteria2` без доменных условий задайте:
 
 ```bash

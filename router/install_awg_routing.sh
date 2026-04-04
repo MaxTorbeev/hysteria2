@@ -40,6 +40,7 @@ DNS_STRATEGY="${DNS_STRATEGY:-ipv4_only}"
 DEBUG_SOCKS_LISTEN="${DEBUG_SOCKS_LISTEN:-127.0.0.1}"
 DEBUG_SOCKS_PORT="${DEBUG_SOCKS_PORT:-1080}"
 INSTALL_ROUTING_PACKAGES="${INSTALL_ROUTING_PACKAGES:-1}"
+REJECT_UDP_443="${REJECT_UDP_443:-0}"
 
 DIRECT_SUFFIXES="${DIRECT_SUFFIXES:-ru,xn--p1ai}"
 VPN_DOMAINS="${VPN_DOMAINS:-youtubei.googleapis.com,www.youtube.com,m.youtube.com,music.youtube.com}"
@@ -104,6 +105,7 @@ Optional variables:
   DNS_STRATEGY                        DNS strategy (default: ipv4_only)
   DEBUG_SOCKS_LISTEN                  Debug SOCKS listen address (default: 127.0.0.1)
   DEBUG_SOCKS_PORT                    Debug SOCKS port (default: 1080)
+  REJECT_UDP_443                     Set to 1 to reject client UDP/443 and force TCP fallback (default: 0)
   VPN_DOMAINS                         Exact domains routed via Hysteria2.
   VPN_SUFFIXES                        Domain suffixes routed via Hysteria2.
   ROUTE_FINAL                         Final outbound for unmatched traffic: direct or hy2-out (default: direct)
@@ -418,6 +420,7 @@ render_config() {
   local vpn_domain_rule=""
   local vpn_suffix_rule=""
   local reject_rule=""
+  local reject_udp_443_rule=""
   local obfs_block=""
   local debug_socks_inbound=""
   local route_final=""
@@ -437,6 +440,19 @@ render_config() {
   fi
   direct_domains="$(add_csv_item "${direct_domains}" "${EXTRA_DIRECT_DOMAINS}")"
 
+  if [[ "${REJECT_UDP_443}" == "1" ]]; then
+    reject_udp_443_rule=$(cat <<'EOF'
+          ,
+          {
+            "network": "udp",
+            "port": 443
+          }
+EOF
+)
+  elif [[ "${REJECT_UDP_443}" != "0" ]]; then
+    die "Unsupported REJECT_UDP_443: ${REJECT_UDP_443} (expected: 0 or 1)"
+  fi
+
   reject_rule=$(cat <<'EOF'
       {
         "type": "logical",
@@ -447,12 +463,13 @@ render_config() {
           },
           {
             "protocol": "stun"
-          }
+          }REJECT_UDP_443_RULE
         ],
         "action": "reject"
       },
 EOF
 )
+  reject_rule="${reject_rule/REJECT_UDP_443_RULE/${reject_udp_443_rule}}"
 
   if [[ -n "${direct_domains//,/}" ]]; then
     domain_rule=$(cat <<EOF
