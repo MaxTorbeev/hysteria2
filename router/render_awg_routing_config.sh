@@ -60,6 +60,11 @@ HYSTERIA_PASSWORD=""
 HYSTERIA_SNI=""
 HYSTERIA_OBFS_TYPE=""
 HYSTERIA_OBFS_PASSWORD=""
+TMP_VPN_DOMAINS_FILE=""
+TMP_VPN_SUFFIXES_FILE=""
+TMP_DIRECT_DOMAINS_FILE=""
+TMP_DIRECT_SUFFIXES_FILE=""
+TMP_FILES=()
 
 log() {
   echo "[render] $*"
@@ -156,9 +161,13 @@ json_quote() {
 
 csv_to_json_array() {
   local csv="$1"
-  local -a items
+  local -a items=()
   local out=""
   IFS=',' read -r -a items <<< "$csv"
+  if ((${#items[@]} == 0)); then
+    printf '[]'
+    return
+  fi
   for item in "${items[@]}"; do
     item="$(trim "$item")"
     [[ -n "${item}" ]] || continue
@@ -194,6 +203,98 @@ append_lines_to_csv() {
   else
     printf '%s,%s' "${current}" "${cleaned}"
   fi
+}
+
+register_tmp_file() {
+  TMP_FILES+=("$1")
+}
+
+cleanup_tmp_files() {
+  local file
+  for file in "${TMP_FILES[@]:-}"; do
+    [[ -n "${file}" ]] || continue
+    rm -f "${file}"
+  done
+}
+
+create_tmp_file() {
+  local file
+  file="$(mktemp)"
+  register_tmp_file "${file}"
+  printf '%s' "${file}"
+}
+
+append_csv_to_file() {
+  local dest_file="$1"
+  local csv="$2"
+  local item
+  local -a items=()
+  IFS=',' read -r -a items <<< "${csv}"
+  if ((${#items[@]} == 0)); then
+    return
+  fi
+  for item in "${items[@]}"; do
+    item="$(trim "${item}")"
+    [[ -n "${item}" ]] || continue
+    [[ "${item}" == \#* ]] && continue
+    printf '%s\n' "${item}" >> "${dest_file}"
+  done
+}
+
+append_clean_file_to_file() {
+  local dest_file="$1"
+  local source_file="$2"
+  [[ -f "${source_file}" ]] || return 0
+  awk '
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 == "" || $0 ~ /^#/) next
+      print $0
+    }
+  ' "${source_file}" >> "${dest_file}"
+}
+
+append_wildcard_lines_to_file() {
+  local dest_file="$1"
+  while IFS= read -r line; do
+    line="$(trim "${line}")"
+    [[ -n "${line}" ]] || continue
+    [[ "${line}" == \#* ]] && continue
+    case "${line}" in
+      \*.*) line="${line#*.}" ;;
+      .*) line="${line#.}" ;;
+    esac
+    printf '%s\n' "${line}" >> "${dest_file}"
+  done
+}
+
+sort_unique_file() {
+  local file="$1"
+  sort -u "${file}" -o "${file}"
+}
+
+json_array_from_file() {
+  local source_file="$1"
+  awk '
+    BEGIN {
+      first = 1
+      printf "["
+    }
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 == "" || $0 ~ /^#/) next
+      gsub(/\\/, "\\\\", $0)
+      gsub(/"/, "\\\"", $0)
+      if (!first) {
+        printf ", "
+      }
+      printf "\"%s\"", $0
+      first = 0
+    }
+    END {
+      printf "]"
+    }
+  ' "${source_file}"
 }
 
 url_decode() {
@@ -304,14 +405,16 @@ fetch_url_lines() {
 }
 
 merge_remote_domain_lists() {
-  local exact_lines wildcard_lines wildcard_suffixes="" exact_count wildcard_count
+  local exact_count wildcard_count
+  local fetched_file
 
   if [[ -n "${IPLIST_DOMAINS_URL}" ]]; then
     log "Fetching exact domains from ${IPLIST_DOMAINS_URL}"
-    if exact_lines="$(fetch_url_lines "${IPLIST_DOMAINS_URL}")"; then
-      exact_count="$(printf '%s\n' "${exact_lines}" | awk 'NF {count++} END {print count+0}')"
+    fetched_file="$(create_tmp_file)"
+    if fetch_url_lines "${IPLIST_DOMAINS_URL}" > "${fetched_file}"; then
+      exact_count="$(awk 'NF {count++} END {print count+0}' "${fetched_file}")"
       log "Fetched ${exact_count} exact domains"
-      VPN_DOMAINS="$(append_lines_to_csv "${VPN_DOMAINS}" "${exact_lines}")"
+      append_clean_file_to_file "${TMP_VPN_DOMAINS_FILE}" "${fetched_file}"
     elif [[ "${IPLIST_STRICT}" == "1" ]]; then
       die "Failed to fetch exact domains from iplist"
     else
@@ -321,19 +424,11 @@ merge_remote_domain_lists() {
 
   if [[ -n "${IPLIST_WILDCARD_DOMAINS_URL}" ]]; then
     log "Fetching wildcard domains from ${IPLIST_WILDCARD_DOMAINS_URL}"
-    if wildcard_lines="$(fetch_url_lines "${IPLIST_WILDCARD_DOMAINS_URL}")"; then
-      wildcard_count="$(printf '%s\n' "${wildcard_lines}" | awk 'NF {count++} END {print count+0}')"
+    fetched_file="$(create_tmp_file)"
+    if fetch_url_lines "${IPLIST_WILDCARD_DOMAINS_URL}" > "${fetched_file}"; then
+      wildcard_count="$(awk 'NF {count++} END {print count+0}' "${fetched_file}")"
       log "Fetched ${wildcard_count} wildcard domains"
-      while IFS= read -r line; do
-        line="$(trim "${line}")"
-        [[ -n "${line}" ]] || continue
-        case "${line}" in
-          \*.*) line="${line#*.}" ;;
-          .*) line="${line#.}" ;;
-        esac
-        wildcard_suffixes="$(add_csv_item "${wildcard_suffixes}" "${line}")"
-      done <<< "${wildcard_lines}"
-      VPN_SUFFIXES="$(add_csv_item "${VPN_SUFFIXES}" "${wildcard_suffixes}")"
+      append_wildcard_lines_to_file "${TMP_VPN_SUFFIXES_FILE}" < "${fetched_file}"
     elif [[ "${IPLIST_STRICT}" == "1" ]]; then
       die "Failed to fetch wildcard domains from iplist"
     else
@@ -343,22 +438,39 @@ merge_remote_domain_lists() {
 }
 
 merge_blocked_files() {
-  local blocked_lines=""
-  local blocked_suffix_lines=""
-
   for file in "${MANUAL_BLOCKED_DOMAINS_FILE}" "${GENERATED_BLOCKED_DOMAINS_FILE}"; do
-    if [[ -f "${file}" ]]; then
-      blocked_lines="$(printf '%s\n%s' "${blocked_lines}" "$(cat "${file}")")"
-    fi
+    append_clean_file_to_file "${TMP_VPN_DOMAINS_FILE}" "${file}"
   done
-  VPN_DOMAINS="$(append_lines_to_csv "${VPN_DOMAINS}" "${blocked_lines}")"
 
   for file in "${MANUAL_BLOCKED_SUFFIXES_FILE}" "${GENERATED_BLOCKED_SUFFIXES_FILE}"; do
-    if [[ -f "${file}" ]]; then
-      blocked_suffix_lines="$(printf '%s\n%s' "${blocked_suffix_lines}" "$(cat "${file}")")"
-    fi
+    append_clean_file_to_file "${TMP_VPN_SUFFIXES_FILE}" "${file}"
   done
-  VPN_SUFFIXES="$(append_lines_to_csv "${VPN_SUFFIXES}" "${blocked_suffix_lines}")"
+}
+
+prepare_domain_files() {
+  TMP_VPN_DOMAINS_FILE="$(create_tmp_file)"
+  TMP_VPN_SUFFIXES_FILE="$(create_tmp_file)"
+  TMP_DIRECT_DOMAINS_FILE="$(create_tmp_file)"
+  TMP_DIRECT_SUFFIXES_FILE="$(create_tmp_file)"
+
+  append_csv_to_file "${TMP_VPN_DOMAINS_FILE}" "${VPN_DOMAINS}"
+  append_csv_to_file "${TMP_VPN_SUFFIXES_FILE}" "${VPN_SUFFIXES}"
+
+  append_csv_to_file "${TMP_DIRECT_DOMAINS_FILE}" "${HYSTERIA_SNI}"
+  if ! is_ip_literal "${HYSTERIA_SERVER}"; then
+    append_csv_to_file "${TMP_DIRECT_DOMAINS_FILE}" "${HYSTERIA_SERVER}"
+  fi
+  append_csv_to_file "${TMP_DIRECT_DOMAINS_FILE}" "${EXTRA_DIRECT_DOMAINS}"
+  append_csv_to_file "${TMP_DIRECT_SUFFIXES_FILE}" "${DIRECT_SUFFIXES}"
+  append_csv_to_file "${TMP_DIRECT_SUFFIXES_FILE}" "${EXTRA_DIRECT_SUFFIXES}"
+
+  merge_remote_domain_lists
+  merge_blocked_files
+
+  sort_unique_file "${TMP_VPN_DOMAINS_FILE}"
+  sort_unique_file "${TMP_VPN_SUFFIXES_FILE}"
+  sort_unique_file "${TMP_DIRECT_DOMAINS_FILE}"
+  sort_unique_file "${TMP_DIRECT_SUFFIXES_FILE}"
 }
 
 write_dns_filter_config() {
@@ -384,7 +496,6 @@ EOF
 }
 
 render_config() {
-  local direct_domains=""
   local domain_rule=""
   local suffix_rule=""
   local vpn_domain_rule=""
@@ -415,12 +526,6 @@ render_config() {
       die "Unsupported DNS_FILTER_ENABLED: ${DNS_FILTER_ENABLED} (expected: 0 or 1)"
       ;;
   esac
-
-  direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SNI}")"
-  if ! is_ip_literal "${HYSTERIA_SERVER}"; then
-    direct_domains="$(add_csv_item "${direct_domains}" "${HYSTERIA_SERVER}")"
-  fi
-  direct_domains="$(add_csv_item "${direct_domains}" "${EXTRA_DIRECT_DOMAINS}")"
 
   if [[ "${REJECT_UDP_443}" == "1" ]]; then
     reject_udp_443_rule=$(cat <<'EOF'
@@ -453,10 +558,10 @@ EOF
 )
   reject_rule="${reject_rule/REJECT_UDP_443_RULE/${reject_udp_443_rule}}"
 
-  if [[ -n "${VPN_DOMAINS//,/}" ]]; then
+  if [[ -s "${TMP_VPN_DOMAINS_FILE}" ]]; then
     vpn_domain_rule=$(cat <<EOF
       {
-        "domain": $(csv_to_json_array "${VPN_DOMAINS}"),
+        "domain": $(json_array_from_file "${TMP_VPN_DOMAINS_FILE}"),
         "action": "route",
         "outbound": "hy2-out"
       },
@@ -464,10 +569,10 @@ EOF
 )
   fi
 
-  if [[ -n "${VPN_SUFFIXES//,/}" ]]; then
+  if [[ -s "${TMP_VPN_SUFFIXES_FILE}" ]]; then
     vpn_suffix_rule=$(cat <<EOF
       {
-        "domain_suffix": $(csv_to_json_array "${VPN_SUFFIXES}"),
+        "domain_suffix": $(json_array_from_file "${TMP_VPN_SUFFIXES_FILE}"),
         "action": "route",
         "outbound": "hy2-out"
       },
@@ -475,10 +580,10 @@ EOF
 )
   fi
 
-  if [[ -n "${direct_domains//,/}" ]]; then
+  if [[ -s "${TMP_DIRECT_DOMAINS_FILE}" ]]; then
     domain_rule=$(cat <<EOF
       {
-        "domain": $(csv_to_json_array "${direct_domains}"),
+        "domain": $(json_array_from_file "${TMP_DIRECT_DOMAINS_FILE}"),
         "action": "route",
         "outbound": "direct"
       },
@@ -486,14 +591,10 @@ EOF
 )
   fi
 
-  if [[ -n "${DIRECT_SUFFIXES//,/}" || -n "${EXTRA_DIRECT_SUFFIXES//,/}" ]]; then
-    local all_suffixes="${DIRECT_SUFFIXES}"
-    if [[ -n "${EXTRA_DIRECT_SUFFIXES}" ]]; then
-      all_suffixes="$(add_csv_item "${all_suffixes}" "${EXTRA_DIRECT_SUFFIXES}")"
-    fi
+  if [[ -s "${TMP_DIRECT_SUFFIXES_FILE}" ]]; then
     suffix_rule=$(cat <<EOF
       {
-        "domain_suffix": $(csv_to_json_array "${all_suffixes}"),
+        "domain_suffix": $(json_array_from_file "${TMP_DIRECT_SUFFIXES_FILE}"),
         "action": "route",
         "outbound": "direct"
       },
@@ -638,6 +739,7 @@ EOF
 }
 
 main() {
+  trap cleanup_tmp_files EXIT
   parse_args "$@"
   load_state_env
   load_input_env
@@ -647,8 +749,7 @@ main() {
   require_cmd curl
   parse_hy2_uri "${HY2_URI}"
   [[ -n "${AWG_IFACE}" ]] || detect_awg_iface
-  merge_remote_domain_lists
-  merge_blocked_files
+  prepare_domain_files
   write_dns_filter_config
   render_config
   sing-box check -c "${CONFIG_FILE}"
