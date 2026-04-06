@@ -26,9 +26,11 @@ SERVER_AWG_NIC="${SERVER_AWG_NIC:-awg0}"
 SERVER_AWG_IPV4="${SERVER_AWG_IPV4:-}"
 SERVER_AWG_IPV6="${SERVER_AWG_IPV6:-}"
 SERVER_PORT="${SERVER_PORT:-}"
-CLIENT_DNS_1="${CLIENT_DNS_1:-1.1.1.1}"
-CLIENT_DNS_2="${CLIENT_DNS_2:-1.0.0.1}"
+CLIENT_DNS_1="${CLIENT_DNS_1:-${SERVER_AWG_IPV4:-10.66.66.1}}"
+CLIENT_DNS_2="${CLIENT_DNS_2:-}"
 ALLOWED_IPS="${ALLOWED_IPS:-0.0.0.0/0}"
+CLIENT_PROFILE_MTU="${CLIENT_PROFILE_MTU:-1380}"
+CLIENT_PERSISTENT_KEEPALIVE="${CLIENT_PERSISTENT_KEEPALIVE:-25}"
 
 AWG_WEB_LISTEN="${AWG_WEB_LISTEN:-127.0.0.1:8080}"
 AWG_WEB_PUBLIC_BASE_URL="${AWG_WEB_PUBLIC_BASE_URL:-}"
@@ -75,9 +77,12 @@ Optional variables:
   SERVER_AWG_IPV4         Optional VPN IPv4 address.
   SERVER_AWG_IPV6         Optional VPN IPv6 address.
   SERVER_PORT             Optional server UDP port.
-  CLIENT_DNS_1            Client DNS #1 (default: 1.1.1.1).
-  CLIENT_DNS_2            Client DNS #2 (default: 1.0.0.1).
+  CLIENT_DNS_1            Client DNS #1 (default: SERVER_AWG_IPV4 or 10.66.66.1).
+  CLIENT_DNS_2            Client DNS #2 (default: empty).
   ALLOWED_IPS             Client allowed IPs (default: 0.0.0.0/0).
+  CLIENT_PROFILE_MTU      MTU injected into generated client profiles (default: 1380).
+  CLIENT_PERSISTENT_KEEPALIVE
+                           PersistentKeepalive injected into generated client profiles (default: 25).
 
   AWG_WEB_LISTEN          Panel listen address (default: 127.0.0.1:8080).
   AWG_WEB_PUBLIC_BASE_URL Optional panel public base URL.
@@ -212,6 +217,71 @@ run_awg_install() {
   )
 }
 
+normalize_generated_client_profiles() {
+  local client_file
+  local dns_value="${CLIENT_DNS_1}"
+
+  if [[ -n "${CLIENT_DNS_2}" ]]; then
+    dns_value="${CLIENT_DNS_1},${CLIENT_DNS_2}"
+  fi
+
+  shopt -s nullglob
+  for client_file in /root/${SERVER_AWG_NIC}-client-*.conf; do
+    log "Normalizing generated client profile ${client_file}"
+    python3 - "${client_file}" "${dns_value}" "${CLIENT_PROFILE_MTU}" "${CLIENT_PERSISTENT_KEEPALIVE}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+dns_value = sys.argv[2]
+mtu_value = sys.argv[3]
+keepalive_value = sys.argv[4]
+
+lines = path.read_text().splitlines()
+out = []
+in_interface = False
+in_peer = False
+mtu_written = False
+keepalive_written = False
+
+for line in lines:
+    stripped = line.strip()
+    if stripped == "[Interface]":
+        in_interface = True
+        in_peer = False
+    elif stripped == "[Peer]":
+        if in_interface and not mtu_written:
+            out.append(f"MTU = {mtu_value}")
+            mtu_written = True
+        in_interface = False
+        in_peer = True
+
+    if in_interface and line.startswith("Address = "):
+        value = line.split("=", 1)[1].split(",", 1)[0].strip()
+        line = f"Address = {value}"
+    elif in_interface and line.startswith("DNS = "):
+        line = f"DNS = {dns_value}"
+    elif in_interface and line.startswith("MTU = "):
+        line = f"MTU = {mtu_value}"
+        mtu_written = True
+    elif in_peer and line.startswith("PersistentKeepalive = "):
+        line = f"PersistentKeepalive = {keepalive_value}"
+        keepalive_written = True
+
+    out.append(line)
+
+if in_interface and not mtu_written:
+    out.append(f"MTU = {mtu_value}")
+
+if not keepalive_written:
+    out.append(f"PersistentKeepalive = {keepalive_value}")
+
+path.write_text("\n".join(out) + "\n")
+PY
+  done
+  shopt -u nullglob
+}
+
 run_web_install() {
   local -a web_args
 
@@ -295,6 +365,7 @@ main() {
   require_cmd git
   checkout_repo
   run_awg_install
+  normalize_generated_client_profiles
   run_web_install
   write_state_env_file
   print_summary
