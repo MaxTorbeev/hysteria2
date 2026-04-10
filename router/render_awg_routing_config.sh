@@ -50,8 +50,10 @@ EXTRA_DIRECT_SUFFIXES="${EXTRA_DIRECT_SUFFIXES:-}"
 DOMAINS_CONFIG_DIR="${DOMAINS_CONFIG_DIR:-${SCRIPT_DIR}/config/domains}"
 MANUAL_BLOCKED_DOMAINS_FILE="${MANUAL_BLOCKED_DOMAINS_FILE:-${DOMAINS_CONFIG_DIR}/blocked_domains.txt}"
 MANUAL_BLOCKED_SUFFIXES_FILE="${MANUAL_BLOCKED_SUFFIXES_FILE:-${DOMAINS_CONFIG_DIR}/blocked_suffixes.txt}"
+MANUAL_BLOCKED_CIDRS_FILE="${MANUAL_BLOCKED_CIDRS_FILE:-${DOMAINS_CONFIG_DIR}/blocked_cidrs.txt}"
 GENERATED_BLOCKED_DOMAINS_FILE="${GENERATED_BLOCKED_DOMAINS_FILE:-${WORK_DIR}/blocked_domains.generated.txt}"
 GENERATED_BLOCKED_SUFFIXES_FILE="${GENERATED_BLOCKED_SUFFIXES_FILE:-${WORK_DIR}/blocked_suffixes.generated.txt}"
+GENERATED_BLOCKED_CIDRS_FILE="${GENERATED_BLOCKED_CIDRS_FILE:-${WORK_DIR}/blocked_cidrs.generated.txt}"
 HY2_URI="${HY2_URI:-}"
 
 HYSTERIA_SERVER=""
@@ -62,6 +64,7 @@ HYSTERIA_OBFS_TYPE=""
 HYSTERIA_OBFS_PASSWORD=""
 TMP_VPN_DOMAINS_FILE=""
 TMP_VPN_SUFFIXES_FILE=""
+TMP_VPN_CIDRS_FILE=""
 TMP_DIRECT_DOMAINS_FILE=""
 TMP_DIRECT_SUFFIXES_FILE=""
 TMP_FILES=()
@@ -445,11 +448,16 @@ merge_blocked_files() {
   for file in "${MANUAL_BLOCKED_SUFFIXES_FILE}" "${GENERATED_BLOCKED_SUFFIXES_FILE}"; do
     append_clean_file_to_file "${TMP_VPN_SUFFIXES_FILE}" "${file}"
   done
+
+  for file in "${MANUAL_BLOCKED_CIDRS_FILE}" "${GENERATED_BLOCKED_CIDRS_FILE}"; do
+    append_clean_file_to_file "${TMP_VPN_CIDRS_FILE}" "${file}"
+  done
 }
 
 prepare_domain_files() {
   TMP_VPN_DOMAINS_FILE="$(create_tmp_file)"
   TMP_VPN_SUFFIXES_FILE="$(create_tmp_file)"
+  TMP_VPN_CIDRS_FILE="$(create_tmp_file)"
   TMP_DIRECT_DOMAINS_FILE="$(create_tmp_file)"
   TMP_DIRECT_SUFFIXES_FILE="$(create_tmp_file)"
 
@@ -469,6 +477,7 @@ prepare_domain_files() {
 
   sort_unique_file "${TMP_VPN_DOMAINS_FILE}"
   sort_unique_file "${TMP_VPN_SUFFIXES_FILE}"
+  sort_unique_file "${TMP_VPN_CIDRS_FILE}"
   sort_unique_file "${TMP_DIRECT_DOMAINS_FILE}"
   sort_unique_file "${TMP_DIRECT_SUFFIXES_FILE}"
 }
@@ -500,6 +509,7 @@ render_config() {
   local suffix_rule=""
   local vpn_domain_rule=""
   local vpn_suffix_rule=""
+  local vpn_cidr_rule=""
   local reject_rule=""
   local reject_udp_443_rule=""
   local obfs_block=""
@@ -573,6 +583,17 @@ EOF
     vpn_suffix_rule=$(cat <<EOF
       {
         "domain_suffix": $(json_array_from_file "${TMP_VPN_SUFFIXES_FILE}"),
+        "action": "route",
+        "outbound": "hy2-out"
+      },
+EOF
+)
+  fi
+
+  if [[ -s "${TMP_VPN_CIDRS_FILE}" ]]; then
+    vpn_cidr_rule=$(cat <<EOF
+      {
+        "ip_cidr": $(json_array_from_file "${TMP_VPN_CIDRS_FILE}"),
         "action": "route",
         "outbound": "hy2-out"
       },
@@ -725,7 +746,7 @@ fi)
         "port": 53,
         "action": "hijack-dns"
       },
-${reject_rule}${vpn_domain_rule}${vpn_suffix_rule}${domain_rule}${suffix_rule}      {
+${reject_rule}${vpn_domain_rule}${vpn_suffix_rule}${vpn_cidr_rule}${domain_rule}${suffix_rule}      {
         "ip_is_private": true,
         "action": "route",
         "outbound": "direct"

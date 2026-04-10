@@ -17,11 +17,12 @@
 - `status_awg_routing.sh` - быстрый статус routing-сервиса
 - `awg-routing-entrypoint.sh` - runtime-логика для host-level `sing-box`, sysctl и runtime-диагностики
 - `render_awg_routing_config.sh` - отдельный builder, который собирает итоговый `sing-box` config из `.env`, manual lists и generated lists
-- `update_blocked_domains.sh` - отдельный updater, который читает `blocked_services.txt`, скачивает exact/wildcard domains из `iplist`, обновляет generated blocklist и при изменениях перерендеривает config
+- `update_blocked_domains.sh` - отдельный updater, который читает `blocked_services.txt`, скачивает exact/wildcard domains и `cidr4` из `iplist`, обновляет generated blocklist и при изменениях перерендеривает config
 - `config/domains/blocked_domains.txt` - ручной exact-list доменов через `hy2-out`
 - `config/domains/blocked_suffixes.txt` - ручной suffix-list доменов через `hy2-out`
+- `config/domains/blocked_cidrs.txt` - ручной IPv4 CIDR-list сетей через `hy2-out`
 - `config/domains/blocked_services.txt` - список сервисов, для которых нужно скачать полный набор доменов из `iplist`
-- `config/domains/iplist_groups.tsv` - mapping `local service -> iplist group`
+- `config/domains/iplist_groups.tsv` - mapping `local service -> source mode + iplist key`
 - `.env.example` - шаблон переменных для неинтерактивного запуска
 
 ## Что делает installer
@@ -157,14 +158,19 @@ curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org --max-time 15
 - По умолчанию exact YouTube-домены заданы вручную в `VPN_DOMAINS`, а из `iplist` тянутся только wildcard-домены.
 - Чтобы поменять policy, используйте `ROUTE_FINAL`, `VPN_DOMAINS`, `VPN_SUFFIXES`, `IPLIST_DOMAINS_URL`, `IPLIST_WILDCARD_DOMAINS_URL`, `DIRECT_SUFFIXES`, `EXTRA_DIRECT_DOMAINS`, `EXTRA_DIRECT_SUFFIXES` в `.env`.
 - Для ручного server-side fallback есть два списка:
+- Для ручного server-side fallback есть три списка:
   - `config/domains/blocked_domains.txt` для exact domains
   - `config/domains/blocked_suffixes.txt` для suffixes
+  - `config/domains/blocked_cidrs.txt` для IPv4 CIDRs
 - Для service-based fallback есть:
   - `config/domains/blocked_services.txt` - список сервисов, которые нужно целиком скачать из `iplist`
-  - `config/domains/iplist_groups.tsv` - mapping `service -> group`
+  - `config/domains/iplist_groups.tsv` - mapping `service -> mode + key`, где:
+    - `group` использует `?format=text&data=domains&group=...`
+    - `site` использует `?format=json&site=...` и вытягивает `domains` + `cidr4`
   - `/opt/hp2-routing/blocked_domains.generated.txt` - generated exact-list
   - `/opt/hp2-routing/blocked_suffixes.generated.txt` - generated suffix-list
-  - `/opt/hp2-routing/blocked_services.state.tsv` - state-файл с `service -> group`
+  - `/opt/hp2-routing/blocked_cidrs.generated.txt` - generated IPv4 CIDR-list
+  - `/opt/hp2-routing/blocked_services.state.tsv` - state-файл с `service -> mode + key`
 - `update_blocked_domains.sh` не меняет ручные файлы. Он читает `config/domains/blocked_services.txt`, скачивает домены из `iplist`, обновляет generated lists и, если что-то изменилось, заново запускает `render_awg_routing_config.sh` и перезапускает routing service.
 - Чтобы отключить `iplist`, задайте `IPLIST_DOMAINS_URL=''` и `IPLIST_WILDCARD_DOMAINS_URL=''`.
 - Чтобы падать при недоступности `iplist`, задайте `IPLIST_STRICT='1'`.
@@ -200,6 +206,7 @@ openai
 После этого updater сам скачает для каждого сервиса:
 - exact domains в `blocked_domains.generated.txt`
 - wildcard/suffix domains в `blocked_suffixes.generated.txt`
+- для `site`-источников ещё и `cidr4` в `blocked_cidrs.generated.txt`
 
 - Для ручного рендера конфига без полной переустановки:
 

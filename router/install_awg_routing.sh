@@ -65,10 +65,12 @@ EXTRA_DIRECT_SUFFIXES="${EXTRA_DIRECT_SUFFIXES:-}"
 DOMAINS_CONFIG_DIR="${DOMAINS_CONFIG_DIR:-${SCRIPT_DIR}/config/domains}"
 MANUAL_BLOCKED_DOMAINS_FILE="${MANUAL_BLOCKED_DOMAINS_FILE:-${DOMAINS_CONFIG_DIR}/blocked_domains.txt}"
 MANUAL_BLOCKED_SUFFIXES_FILE="${MANUAL_BLOCKED_SUFFIXES_FILE:-${DOMAINS_CONFIG_DIR}/blocked_suffixes.txt}"
+MANUAL_BLOCKED_CIDRS_FILE="${MANUAL_BLOCKED_CIDRS_FILE:-${DOMAINS_CONFIG_DIR}/blocked_cidrs.txt}"
 BLOCKED_SERVICES_FILE="${BLOCKED_SERVICES_FILE:-${DOMAINS_CONFIG_DIR}/blocked_services.txt}"
 IPLIST_GROUPS_FILE="${IPLIST_GROUPS_FILE:-${DOMAINS_CONFIG_DIR}/iplist_groups.tsv}"
 GENERATED_BLOCKED_DOMAINS_FILE="${GENERATED_BLOCKED_DOMAINS_FILE:-${WORK_DIR}/blocked_domains.generated.txt}"
 GENERATED_BLOCKED_SUFFIXES_FILE="${GENERATED_BLOCKED_SUFFIXES_FILE:-${WORK_DIR}/blocked_suffixes.generated.txt}"
+GENERATED_BLOCKED_CIDRS_FILE="${GENERATED_BLOCKED_CIDRS_FILE:-${WORK_DIR}/blocked_cidrs.generated.txt}"
 BLOCKED_SERVICES_STATE_FILE="${BLOCKED_SERVICES_STATE_FILE:-${WORK_DIR}/blocked_services.state.tsv}"
 IPLIST_BASE_URL="${IPLIST_BASE_URL:-https://iplist.opencck.org/}"
 SAVE_STATE_ENV="${SAVE_STATE_ENV:-1}"
@@ -142,11 +144,13 @@ Optional variables:
   EXTRA_DIRECT_SUFFIXES               Extra direct suffixes.
   MANUAL_BLOCKED_DOMAINS_FILE         Exact domains always routed via Hysteria2.
   MANUAL_BLOCKED_SUFFIXES_FILE        Domain suffixes always routed via Hysteria2.
+  MANUAL_BLOCKED_CIDRS_FILE           IPv4 CIDRs always routed via Hysteria2.
   BLOCKED_SERVICES_FILE               Service names to expand from iplist groups.
   IPLIST_GROUPS_FILE                  Mapping file: local service name -> iplist group.
   GENERATED_BLOCKED_DOMAINS_FILE      Generated exact domains routed via Hysteria2.
   GENERATED_BLOCKED_SUFFIXES_FILE     Generated suffixes routed via Hysteria2.
-  BLOCKED_SERVICES_STATE_FILE         State file with resolved service -> group mapping.
+  GENERATED_BLOCKED_CIDRS_FILE        Generated IPv4 CIDRs routed via Hysteria2.
+  BLOCKED_SERVICES_STATE_FILE         State file with resolved service -> source mapping.
   IPLIST_BASE_URL                     Base URL for iplist service downloads.
 EOF
 }
@@ -787,10 +791,12 @@ EXTRA_DIRECT_DOMAINS=$(printf '%q' "${EXTRA_DIRECT_DOMAINS}")
 EXTRA_DIRECT_SUFFIXES=$(printf '%q' "${EXTRA_DIRECT_SUFFIXES}")
 MANUAL_BLOCKED_DOMAINS_FILE=$(printf '%q' "${MANUAL_BLOCKED_DOMAINS_FILE}")
 MANUAL_BLOCKED_SUFFIXES_FILE=$(printf '%q' "${MANUAL_BLOCKED_SUFFIXES_FILE}")
+MANUAL_BLOCKED_CIDRS_FILE=$(printf '%q' "${MANUAL_BLOCKED_CIDRS_FILE}")
 BLOCKED_SERVICES_FILE=$(printf '%q' "${BLOCKED_SERVICES_FILE}")
 IPLIST_GROUPS_FILE=$(printf '%q' "${IPLIST_GROUPS_FILE}")
 GENERATED_BLOCKED_DOMAINS_FILE=$(printf '%q' "${GENERATED_BLOCKED_DOMAINS_FILE}")
 GENERATED_BLOCKED_SUFFIXES_FILE=$(printf '%q' "${GENERATED_BLOCKED_SUFFIXES_FILE}")
+GENERATED_BLOCKED_CIDRS_FILE=$(printf '%q' "${GENERATED_BLOCKED_CIDRS_FILE}")
 BLOCKED_SERVICES_STATE_FILE=$(printf '%q' "${BLOCKED_SERVICES_STATE_FILE}")
 IPLIST_BASE_URL=$(printf '%q' "${IPLIST_BASE_URL}")
 INSTALL_LOG_FILE=$(printf '%q' "${INSTALL_LOG_FILE}")

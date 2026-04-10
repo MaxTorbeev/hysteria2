@@ -12,6 +12,7 @@ BLOCKED_SERVICES_FILE="${BLOCKED_SERVICES_FILE:-${DOMAINS_CONFIG_DIR}/blocked_se
 IPLIST_GROUPS_FILE="${IPLIST_GROUPS_FILE:-${DOMAINS_CONFIG_DIR}/iplist_groups.tsv}"
 GENERATED_BLOCKED_DOMAINS_FILE="${GENERATED_BLOCKED_DOMAINS_FILE:-${WORK_DIR}/blocked_domains.generated.txt}"
 GENERATED_BLOCKED_SUFFIXES_FILE="${GENERATED_BLOCKED_SUFFIXES_FILE:-${WORK_DIR}/blocked_suffixes.generated.txt}"
+GENERATED_BLOCKED_CIDRS_FILE="${GENERATED_BLOCKED_CIDRS_FILE:-${WORK_DIR}/blocked_cidrs.generated.txt}"
 BLOCKED_SERVICES_STATE_FILE="${BLOCKED_SERVICES_STATE_FILE:-${WORK_DIR}/blocked_services.state.tsv}"
 RENDER_SCRIPT_FILE="${RENDER_SCRIPT_FILE:-${WORK_DIR}/bin/render_awg_routing_config.sh}"
 SERVICE_NAME="${SERVICE_NAME:-hp2-routing}"
@@ -98,7 +99,8 @@ resolve_source() {
   printf 'group\t%s' "${service}"
 }
 
-extract_site_domains() {
+extract_site_values() {
+  local key="$1"
   python3 -c '
 import json
 import sys
@@ -108,26 +110,32 @@ try:
 except Exception:
     sys.exit(1)
 
-if not isinstance(payload, dict):
-    sys.exit(0)
+key = sys.argv[1]
 
-for value in payload.values():
+if isinstance(payload, dict):
+    candidates = payload.values()
+elif isinstance(payload, list):
+    candidates = payload
+else:
+    candidates = []
+
+for value in candidates:
     if not isinstance(value, dict):
         continue
-    domains = value.get("domains", [])
-    if isinstance(domains, list):
-        for domain in domains:
-            if isinstance(domain, str):
-                domain = domain.strip()
-                if domain:
-                    print(domain)
+    items = value.get(key, [])
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, str):
+                item = item.strip()
+                if item:
+                    print(item)
     break
-'
+' "${key}"
 }
 
 main() {
   local line service source_mode source_value
-  local exact_tmp suffix_tmp state_tmp
+  local exact_tmp suffix_tmp cidr_tmp state_tmp
   local exact_url suffix_url site_url exact_lines suffix_lines site_json
   local changed=0
 
@@ -140,6 +148,7 @@ main() {
   mkdir -p "${WORK_DIR}"
   exact_tmp="$(mktemp)"
   suffix_tmp="$(mktemp)"
+  cidr_tmp="$(mktemp)"
   state_tmp="$(mktemp)"
 
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -187,11 +196,19 @@ main() {
 
         log "Fetching exact domains for ${service} (site=${source_value})"
         if site_json="$(fetch_url_lines "${site_url}")"; then
-          if ! printf '%s\n' "${site_json}" | extract_site_domains | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if (length($0)) print $0}' >> "${exact_tmp}"; then
+          if ! printf '%s\n' "${site_json}" | extract_site_values domains | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if (length($0)) print $0}' >> "${exact_tmp}"; then
             if [[ "${IPLIST_STRICT}" == "1" ]]; then
               die "Failed to parse exact domains for service ${service} (site=${source_value})"
             else
               warn "Failed to parse exact domains for ${service}, continuing"
+            fi
+          fi
+          log "Fetching IPv4 CIDRs for ${service} (site=${source_value})"
+          if ! printf '%s\n' "${site_json}" | extract_site_values cidr4 | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if (length($0)) print $0}' >> "${cidr_tmp}"; then
+            if [[ "${IPLIST_STRICT}" == "1" ]]; then
+              die "Failed to parse IPv4 CIDRs for service ${service} (site=${source_value})"
+            else
+              warn "Failed to parse IPv4 CIDRs for ${service}, continuing"
             fi
           fi
         elif [[ "${IPLIST_STRICT}" == "1" ]]; then
@@ -210,6 +227,7 @@ main() {
 
   sort -u "${exact_tmp}" -o "${exact_tmp}"
   sort -u "${suffix_tmp}" -o "${suffix_tmp}"
+  sort -u "${cidr_tmp}" -o "${cidr_tmp}"
   sort -u "${state_tmp}" -o "${state_tmp}"
 
   if [[ ! -f "${GENERATED_BLOCKED_DOMAINS_FILE}" ]] || ! cmp -s "${exact_tmp}" "${GENERATED_BLOCKED_DOMAINS_FILE}"; then
@@ -224,6 +242,13 @@ main() {
     changed=1
   else
     rm -f "${suffix_tmp}"
+  fi
+
+  if [[ ! -f "${GENERATED_BLOCKED_CIDRS_FILE}" ]] || ! cmp -s "${cidr_tmp}" "${GENERATED_BLOCKED_CIDRS_FILE}"; then
+    mv "${cidr_tmp}" "${GENERATED_BLOCKED_CIDRS_FILE}"
+    changed=1
+  else
+    rm -f "${cidr_tmp}"
   fi
 
   if [[ ! -f "${BLOCKED_SERVICES_STATE_FILE}" ]] || ! cmp -s "${state_tmp}" "${BLOCKED_SERVICES_STATE_FILE}"; then
